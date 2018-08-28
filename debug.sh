@@ -1,7 +1,7 @@
 #!/bin/bash
 
 REDIS_HOST=redis-service
-REDIS_PORT=6379
+REDIS_PORT=40960
 INTERVAL=5
 
 while true; do
