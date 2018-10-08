@@ -70,20 +70,23 @@ while true; do
         requiredPods=1
       fi
   
+      debug "$(date) -- debug -- namespace: $namespace"
+      debug "$(date) -- debug -- deployment name: $deployment"
+      debug "$(date) -- debug -- number of keys: $numberOfKeys"
+      debug "$(date) -- debug -- number of keys per pod: $keysPerPod"
       debug "$(date) -- debug -- number of required pods: $requiredPods"
+      debug "$(date) -- debug -- max pods: $maxPods"
+      debug "$(date) -- debug -- min pods: $minPods"
       # Now, if we need one or more pods
       if [[ $requiredPods -ge 1 ]]; then
   
         # find out how many pods we've already requested.
         currentPods=$(getCurrentPods)
-        debug "$(date) -- debug -- got current pods"
-        debug "$(date) -- debug -- current number of pods: $current"
+        debug "$(date) -- debug -- current number of pods: $currentPods"
   
         # If we alrady have some pods requested
         if [[ $currentPods != "" ]]; then
           # and the amount we need is different from what we already have requested
-          debug "$(date) -- debug -- variables: $requiredPods , $currentPods"
-          #debug "$(date) -- debug -- $($requiredPods -ne $currentPods)"
           if [[ "$requiredPods" -ne "$currentPods" ]]; then
               debug "$(date) -- debug -- need more pods"
             # Determine how many pods we need, taking into account scaling limits.
@@ -137,13 +140,19 @@ while true; do
             fi
           else
             debug "$(date) -- debug -- apparently don't need more pods"
-            debug "$(date) -- debug -- variable names: $requiredPods , $currentPods" 
           fi
         else
           echo "$(date) -- Failed to get current pods number for $deployment."
         fi
       else
-        echo "$(date) -- Don't need any pods for $deployment. Good work, team!"
+        echo "$(date) -- Don't need any pods for $deployment."
+        if [[ $minPods -eq 0 ]]; then
+          desiredPods=$requiredPods
+          kubectl scale -n $namespace --replicas=$desiredPods deployment/$deployment 1> /dev/null
+          echo "$(date) -- So we scaled down to 0."
+        else
+          echo "$(date) -- But we have to keep a minimum number of pods."
+        fi
       fi
     else
       echo "$(date) -- Failed to get queue messages from $RABBIT_HOST for $deployment."
@@ -153,5 +162,15 @@ while true; do
     debug "$(date) -- debug --"
     debug "$(date) -- debug --"
   done
+
+  # We need to account for the long time it takes to start up a GPU instance.
+  # A crude way of doing this is just to greatly lengthen the queue-checking
+  # interval when GPUs are requested.
+  if [[ $desiredPods -gt 0 ]]; then
+    ADJUSTED_INTERVAL=360
+  else
+    ADJUSTED_INTERVAL=$INTERVAL
+  fi
+
   sleep $INTERVAL
 done
