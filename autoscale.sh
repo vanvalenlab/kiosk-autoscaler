@@ -26,7 +26,7 @@ function getCurrentPods() {
         pod_checking_keyword=Parallelism
     fi
     current=$(kubectl -n $namespace describe $resource_type $deployment | \
-      grep $pod_checking_keyword | awk '{print $2}' | head -n1)
+      grep "$pod_checking_keyword" | awk '{print $2}' | head -n1)
 
     if [[ $current != "" ]]; then
       echo $current
