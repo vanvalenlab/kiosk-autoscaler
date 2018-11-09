@@ -20,8 +20,13 @@ function getCurrentPods() {
   # Retry up to 5 times if kubectl fails
   for i in $(seq 5); do
 
+    if [ "$resource_type" == "deployment" ]; then
+        pod_checking_keyword=desired
+    elif [ "$resource-type" == "job" ]; then
+        pod_checking_keyword=Parallelism
+    fi
     current=$(kubectl -n $namespace describe $resource_type $deployment | \
-      grep desired | awk '{print $2}' | head -n1)
+      grep $pod_checking_keyword | awk '{print $2}' | head -n1)
 
     if [[ $current != "" ]]; then
       echo $current
