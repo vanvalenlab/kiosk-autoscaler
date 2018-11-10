@@ -22,13 +22,15 @@ function getCurrentPods() {
 
     if [ "$resource_type" == "deployment" ]; then
         pod_checking_keyword=desired
-    elif [ "$resource-type" == "job" ]; then
+    elif [ "$resource_type" == "job" ]; then
         pod_checking_keyword=Parallelism
     fi
+    #debug "$(date) -- debug -- $(kubectl -n $namespace describe $resource_type $deployment | grep 'Parallelism')"
     current=$(kubectl -n $namespace describe $resource_type $deployment | \
       grep "$pod_checking_keyword" | awk '{print $2}' | head -n1)
 
     if [[ $current != "" ]]; then
+      #debug "$(date) -- debug -- $(echo $current)"
       echo $current
       return 0
     fi
@@ -164,7 +166,7 @@ while true; do
         echo "$(date) -- Don't need any pods for $deployment."
         if [[ $minPods -eq 0 ]]; then
           desiredPods=$requiredPods
-          kubectl scale -n $namespace --replicas=$desiredPods deployment/$deployment 1> /dev/null
+          kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
           echo "$(date) -- So we scaled down to 0."
         else
           echo "$(date) -- But we have to keep a minimum number of pods."
