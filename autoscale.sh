@@ -19,10 +19,18 @@ function debug() {
 function getCurrentPods() {
   # Retry up to 5 times if kubectl fails
   for i in $(seq 5); do
-    current=$(kubectl -n $namespace describe deploy $deployment | \
-      grep desired | awk '{print $2}' | head -n1)
+
+    if [ "$resource_type" == "deployment" ]; then
+        pod_checking_keyword=desired
+    elif [ "$resource_type" == "job" ]; then
+        pod_checking_keyword=Parallelism
+    fi
+    #debug "$(date) -- debug -- $(kubectl -n $namespace describe $resource_type $deployment | grep 'Parallelism')"
+    current=$(kubectl -n $namespace describe $resource_type $deployment | \
+      grep "$pod_checking_keyword" | awk '{print $2}' | head -n1)
 
     if [[ $current != "" ]]; then
+      #debug "$(date) -- debug -- $(echo $current)"
       echo $current
       return 0
     fi
@@ -47,10 +55,17 @@ debug "$(date) -- debug -- autoscalingArr[1]: ${autoscalingArr[1]}"
 while true; do
 
   for autoscaler in "${autoscalingArr[@]}"; do
-    IFS='|' read minPods maxPods keysPerPod namespace deployment <<< "$autoscaler"
-  
+    IFS='|' read minPods maxPods keysPerPod namespace resource_type predict_or_train deployment <<< "$autoscaler"
+    # the "resource_type" field is meant to indicate whether a given resource is a deployment or a job
+    # the "predict_or_train" field is meant to indicate whether a given deployment deals with training or prediction
+
+
     # Retrieve all keys
-    queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "*")
+    if [ "$predict_or_train" == "predict" ]; then
+        queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "predict_*")
+    elif [ "$predict_or_train" == "train" ]; then
+        queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "train_*")
+    fi
   
     # then, if the last call was successful
     if [[ $? -eq 0 ]]; then
@@ -66,11 +81,14 @@ while true; do
       requiredPods=$(echo "$numberOfKeys/$keysPerPod" | bc 2> /dev/null)
   
       # If we don't have enough jobs to fill up an entire pod, should we still provision one?
-      if [[ $requiredPods -eq 0  &&  $numberOfKeys -gt 0 ]]; then
+      # Yes, if we're talking about prediction pods.
+      if [[ $predict_or_train == "predict" && $requiredPods -eq 0  &&  $numberOfKeys -gt 0 ]]; then
         requiredPods=1
       fi
   
       debug "$(date) -- debug -- namespace: $namespace"
+      debug "$(date) -- debug -- resource type: $resource_type"
+      debug "$(date) -- debug -- predict or train: $predict_or_train"
       debug "$(date) -- debug -- deployment name: $deployment"
       debug "$(date) -- debug -- number of keys: $numberOfKeys"
       debug "$(date) -- debug -- number of keys per pod: $keysPerPod"
@@ -116,7 +134,7 @@ while true; do
                 desiredPods=$(awk "BEGIN { print int( ($currentPods - $desiredPods) * 0.9 + $desiredPods ) }")
               fi
   
-              kubectl scale -n $namespace --replicas=$desiredPods deployment/$deployment 1> /dev/null
+              kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
   
               if [[ $? -eq 0 ]]; then
                 # Adjust logging and Slack notifications based on LOGS env and desiredPods number
@@ -148,7 +166,7 @@ while true; do
         echo "$(date) -- Don't need any pods for $deployment."
         if [[ $minPods -eq 0 ]]; then
           desiredPods=$requiredPods
-          kubectl scale -n $namespace --replicas=$desiredPods deployment/$deployment 1> /dev/null
+          kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
           echo "$(date) -- So we scaled down to 0."
         else
           echo "$(date) -- But we have to keep a minimum number of pods."
