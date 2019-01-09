@@ -62,27 +62,53 @@ while true; do
 
     # Retrieve all keys
     if [ "$predict_or_train" == "predict" ]; then
-        queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "predict_*")
+      queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "predict_*")
     elif [ "$predict_or_train" == "train" ]; then
-        queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "train_*")
+      queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "train_*")
     fi
   
     # then, if the last call was successful
     if [[ $? -eq 0 ]]; then
   
-      # find out how many keys we retrieved
-      numberOfKeys=0
+      # find out how many of the keys we retrieved were zip files, how many were
+      # images, and how many were, regardless of their file type, expired
+      imageKeys=0
+      zipKeys=0
       for key in $queueKeys
       do
-          ((numberOfKeys++))
+        key_status=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key status)
+        if [[ "$key_status" != "done" && "$key_status" != "failed" ]]; then
+          file_name=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key file_name)
+          if [[ $file_name =~ ^.+\.zip$ ]]; then
+            ((zipKeys++))
+          else
+            ((imageKeys++))
+          fi
+        else 
+          :
+        fi
       done
   
       # and determine how many pods we need.
-      requiredPods=$(echo "$numberOfKeys/$keysPerPod" | bc 2> /dev/null)
-  
+      imagePods=$(echo "$imageKeys/$keysPerPod" | bc 2> /dev/null)
+      zipPods=$(echo "$zipKeys/$keysPerPod" | bc 2> /dev/null)
+
+      # Does this deployment revolve around zip files or image files?
+      # Note that the answer could vary for predictoin-related eployments, but htat 
+      # all training-related deployments use zip files.
+      if [ "$predict_or_train" == "predict" ]; then
+        if [[ "$deployment" == "zip-consumer-deployment" ]]; then
+          requiredPods=$zipPods
+        else
+          requiredPods=$imagePods
+        fi
+      else
+        requiredPods=$zipPods
+      fi
+
       # If we don't have enough jobs to fill up an entire pod, should we still provision one?
-      # Yes, if we're talking about prediction pods.
-      if [[ $predict_or_train == "predict" && $requiredPods -eq 0  &&  $numberOfKeys -gt 0 ]]; then
+      # Yes, if we're talking about image prediction pods.
+      if [[ $predict_or_train == "predict" && $requiredPods -eq 0  &&  $imageKeys -gt 0 ]]; then
         requiredPods=1
       fi
   
@@ -90,11 +116,21 @@ while true; do
       debug "$(date) -- debug -- resource type: $resource_type"
       debug "$(date) -- debug -- predict or train: $predict_or_train"
       debug "$(date) -- debug -- deployment name: $deployment"
-      debug "$(date) -- debug -- number of keys: $numberOfKeys"
+      if [[ "$deployment" == "zip-consumer-deployment" ]]; then
+        debug "$(date) -- debug -- number of keys: $zipeKeys"
+      else
+        debug "$(date) -- debug -- number of keys: $imageKeys"
+      fi 
       debug "$(date) -- debug -- number of keys per pod: $keysPerPod"
-      debug "$(date) -- debug -- number of required pods: $requiredPods"
+      if [[ "$deployment" == "zip-consumer-deployment" ]]; then
+        debug "$(date) -- debug -- number of required pods: $zipPods"
+      else
+        debug "$(date) -- debug -- number of required pods: $requiredPods"
+      fi
       debug "$(date) -- debug -- max pods: $maxPods"
       debug "$(date) -- debug -- min pods: $minPods"
+
+
       # Now, if we need one or more pods
       if [[ $requiredPods -ge 1 ]]; then
   
