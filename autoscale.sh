@@ -85,7 +85,7 @@ function scale_and_log() {
 }
 
 function scale_pods() {
-  kubectl scale -n $namespace --replicas=$podTarget $resource_type/$deployment 1> /dev/null
+  kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
 }
 
 function log_scaling_result() {
