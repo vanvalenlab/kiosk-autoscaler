@@ -41,7 +41,7 @@ function getCurrentPods() {
 
     if [[ $current != "" ]]; then
       #debug "$(date) -- debug -- $(echo $current)"
-      echo $current
+      #echo $current
       return 0
     fi
 
@@ -70,6 +70,17 @@ function verify_mins_and_maxes() {
     fi
   else
     desiredPods=$requiredPods
+  fi
+}
+
+function prevent_intermediate_scaledown() {
+  # We're also inserting a check to prevent scaling down until we only want zero pods.
+  if [[ $desiredPods -le $currentPods ]]; then
+    if [[ $desiredPods -eq 0 ]]; then
+      :
+    else
+      $desiredPods=$currentPods
+    fi
   fi
 }  
 
@@ -103,7 +114,7 @@ function log_scaling_result() {
     fi
 
     if $log ; then
-      echo "$(date) -- Scaled $deployment to $desiredPods pods ($queueMessages msg in the Redis queue)"
+      #echo "$(date) -- Scaled $deployment to $desiredPods pods ($queueMessages msg in the Redis queue)"
     fi
   else
     echo "$(date) -- Failed to scale $deployment pods."
@@ -157,41 +168,40 @@ function determine_required_pods() {
 }
 
 function output_debug_info() {
-  debug "$(date) -- debug -- namespace: $namespace"
-  debug "$(date) -- debug -- resource type: $resource_type"
-  debug "$(date) -- debug -- predict or train: $predict_or_train"
+  #debug "$(date) -- debug -- namespace: $namespace"
+  #debug "$(date) -- debug -- resource type: $resource_type"
+  #debug "$(date) -- debug -- predict or train: $predict_or_train"
   debug "$(date) -- debug -- deployment name: $deployment"
   if [[ "$deployment" == "zip-consumer-deployment" ]]; then
-    debug "$(date) -- debug -- number of keys: $zipeKeys"
+    debug "$(date) -- debug -- number of keys: $zipKeys"
   else
     debug "$(date) -- debug -- number of keys: $imageKeys"
   fi 
   debug "$(date) -- debug -- number of keys per pod: $keysPerPod"
-  if [[ "$deployment" == "zip-consumer-deployment" ]]; then
-    debug "$(date) -- debug -- number of required pods: $zipPods"
-  else
-    debug "$(date) -- debug -- number of required pods: $requiredPods"
-  fi
+  debug "$(date) -- debug -- number of required pods: $requiredPods"
   debug "$(date) -- debug -- max pods: $maxPods"
   debug "$(date) -- debug -- min pods: $minPods"
+  debug "$(date) -- debug -- current pods: $currentPods"
 }
 
 function do_need_pods() {
   # find out how many pods we've already requested.
   currentPods=$(getCurrentPods)
-  debug "$(date) -- debug -- current number of pods: $currentPods"
+  #debug "$(date) -- debug -- current number of pods: $currentPods"
 
   # If we already have some pods requested
   if [[ $currentPods != "" ]]; then
     # and the amount we need is different from what we already have requested
     if [[ "$requiredPods" -ne "$currentPods" ]]; then
-      debug "$(date) -- debug -- need to change numer of pods, but to what?"
+      #debug "$(date) -- debug -- need to change numer of pods, but to what?"
       # Determine how many pods we need, taking into account scaling limits.
       verify_mins_and_maxes
+      # For the time being, let's prevent scaledown, unless it's a complete scaledown
+      prevent_intermediate_scaledown
       # If appropriate, go ahead and scale.
       scale_and_log
     else
-      debug "$(date) -- debug -- apparently don't need more pods"
+      #debug "$(date) -- debug -- apparently don't need more pods"
     fi
   else
     echo "$(date) -- Failed to get current pods number for $deployment."
@@ -199,13 +209,13 @@ function do_need_pods() {
 }
 
 function dont_need_pods() {
-  echo "$(date) -- Don't need any pods for $deployment."
+  #echo "$(date) -- Don't need any pods for $deployment."
   if [[ $minPods -eq 0 ]]; then
     desiredPods=$requiredPods
     kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
-    echo "$(date) -- So we scaled down to 0."
+    #echo "$(date) -- So we scaled down to 0."
   else
-    echo "$(date) -- But we have to keep a minimum number of pods."
+    #echo "$(date) -- But we have to keep a minimum number of pods."
   fi
 }
 
@@ -233,7 +243,9 @@ while true; do
     if [[ $? -eq 0 ]]; then
       get_keys
       determine_required_pods
+    if [[ "$requiredPods" -ne "$currentPods" ]]; then
       output_debug_info
+    fi
 
       # Now, do we need one or more pods?
       if [[ $requiredPods -ge 1 ]]; then
@@ -245,9 +257,9 @@ while true; do
       echo "$(date) -- Failed to get entries from Redis for $deployment."
     fi
     debug "$(date) -- debug --"
-    debug "$(date) -- debug --"
-    debug "$(date) -- debug --"
-    debug "$(date) -- debug --"
+    #debug "$(date) -- debug --"
+    #debug "$(date) -- debug --"
+    #debug "$(date) -- debug --"
   done
 
   # We need to account for the long time it takes to start up a GPU instance.
