@@ -29,6 +29,7 @@ function debug() {
 function getCurrentPods() {
   # Retry up to 5 times if kubectl fails
   for i in $(seq 5); do
+    #debug "$(date) -- debug -- debug test"
 
     if [ "$resource_type" == "deployment" ]; then
         pod_checking_keyword=desired
@@ -36,14 +37,18 @@ function getCurrentPods() {
         pod_checking_keyword=Parallelism
     fi
     #debug "$(date) -- debug -- $(kubectl -n $namespace describe $resource_type $deployment | grep 'Parallelism')"
+    current=25 #resetting current
     current=$(kubectl -n $namespace describe $resource_type $deployment | \
       grep "$pod_checking_keyword" | awk '{print $2}' | head -n1)
+    #if [ "$resource_type" == "job" ]; then
+    #    debug "$(date) -- debug -- current training parallelism: $(echo $current)"
+    #fi
 
-    if [[ $current != "" ]]; then
-      #debug "$(date) -- debug -- $(echo $current)"
-      #echo $current
-      return 0
-    fi
+    #if [[ $current != "" ]]; then
+    #  debug "$(date) -- debug -- debugging current assignment: $(echo $current)"
+    echo $current
+    return 0
+    #fi
 
     sleep 3
   done
@@ -79,7 +84,7 @@ function prevent_intermediate_scaledown() {
     if [[ $desiredPods -eq 0 ]]; then
       :
     else
-      $desiredPods=$currentPods
+      desiredPods=$currentPods
     fi
   fi
 }  
@@ -90,8 +95,11 @@ function scale_and_log() {
   #if [[ $desiredPods -lt $currentPods ]]; then
   #  desiredPods=$(awk "BEGIN { print int( ($currentPods - $desiredPods) * 0.9 + $desiredPods ) }")
   #fi
+    if [[ "$requiredPods" -ne "$currentPods" ]]; then
+      output_debug_info
+    fi
     scale_pods
-    log_scaling_result
+    #log_scaling_result
   fi
 }
 
@@ -115,6 +123,7 @@ function log_scaling_result() {
 
     if $log ; then
       #echo "$(date) -- Scaled $deployment to $desiredPods pods ($queueMessages msg in the Redis queue)"
+      :
     fi
   else
     echo "$(date) -- Failed to scale $deployment pods."
@@ -126,6 +135,7 @@ function get_keys() {
   # images, and how many were, regardless of their file type, expired
   imageKeys=0
   zipKeys=0
+  trainKeys=0
   for key in $queueKeys
   do
     key_status=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key status)
@@ -133,8 +143,10 @@ function get_keys() {
       file_name=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key file_name)
       if [[ $file_name =~ ^.+\.zip$ ]]; then
         ((zipKeys++))
-      else
+      elif [[ $file_name =~ ^predict.+$ ]]; then
         ((imageKeys++))
+      elif [[ $file_name =~ ^train.+$ ]]; then
+        ((trainKeys++))
       fi
     else 
       :
@@ -146,6 +158,7 @@ function determine_required_pods() {
   # and determine how many pods we need.
   imagePods=$(echo "$imageKeys/$keysPerPod" | bc 2> /dev/null)
   zipPods=$(echo "$zipKeys/$keysPerPod" | bc 2> /dev/null)
+  trainPods=$(echo "$trainKeys/$keysPerPod" | bc 2> /dev/null)
 
   # Does this deployment revolve around zip files or image files?
   # Note that the answer could vary for predictoin-related eployments, but htat 
@@ -157,7 +170,7 @@ function determine_required_pods() {
       requiredPods=$imagePods
     fi
   else
-    requiredPods=$zipPods
+    requiredPods=$trainPods
   fi
 
   # If we don't have enough jobs to fill up an entire pod, should we still provision one?
@@ -171,6 +184,7 @@ function output_debug_info() {
   #debug "$(date) -- debug -- namespace: $namespace"
   #debug "$(date) -- debug -- resource type: $resource_type"
   #debug "$(date) -- debug -- predict or train: $predict_or_train"
+  debug "$(date) -- debug --"
   debug "$(date) -- debug -- deployment name: $deployment"
   if [[ "$deployment" == "zip-consumer-deployment" ]]; then
     debug "$(date) -- debug -- number of keys: $zipKeys"
@@ -186,22 +200,29 @@ function output_debug_info() {
 
 function do_need_pods() {
   # find out how many pods we've already requested.
+  debug "$(date) -- debug -- 0deployment name: $deployment"
   currentPods=$(getCurrentPods)
   #debug "$(date) -- debug -- current number of pods: $currentPods"
 
   # If we already have some pods requested
+  debug "$(date) -- debug -- 0current pods: $currentPods"
+  debug "$(date) -- debug -- 0required pods: $requiredPods"
   if [[ $currentPods != "" ]]; then
     # and the amount we need is different from what we already have requested
     if [[ "$requiredPods" -ne "$currentPods" ]]; then
       #debug "$(date) -- debug -- need to change numer of pods, but to what?"
       # Determine how many pods we need, taking into account scaling limits.
+      debug "$(date) -- debug -- 1current pods: $currentPods"
       verify_mins_and_maxes
       # For the time being, let's prevent scaledown, unless it's a complete scaledown
+      debug "$(date) -- debug -- 2current pods: $currentPods"
       prevent_intermediate_scaledown
       # If appropriate, go ahead and scale.
+      debug "$(date) -- debug -- 3current pods: $currentPods"
       scale_and_log
     else
       #debug "$(date) -- debug -- apparently don't need more pods"
+      :
     fi
   else
     echo "$(date) -- Failed to get current pods number for $deployment."
@@ -211,11 +232,15 @@ function do_need_pods() {
 function dont_need_pods() {
   #echo "$(date) -- Don't need any pods for $deployment."
   if [[ $minPods -eq 0 ]]; then
+    if [[ "$requiredPods" -ne "$currentPods" ]]; then
+      output_debug_info
+    fi
     desiredPods=$requiredPods
     kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
     #echo "$(date) -- So we scaled down to 0."
   else
     #echo "$(date) -- But we have to keep a minimum number of pods."
+    :
   fi
 }
 
@@ -243,9 +268,6 @@ while true; do
     if [[ $? -eq 0 ]]; then
       get_keys
       determine_required_pods
-    if [[ "$requiredPods" -ne "$currentPods" ]]; then
-      output_debug_info
-    fi
 
       # Now, do we need one or more pods?
       if [[ $requiredPods -ge 1 ]]; then
@@ -256,7 +278,7 @@ while true; do
     else
       echo "$(date) -- Failed to get entries from Redis for $deployment."
     fi
-    debug "$(date) -- debug --"
+    #debug "$(date) -- debug --"
     #debug "$(date) -- debug --"
     #debug "$(date) -- debug --"
     #debug "$(date) -- debug --"
