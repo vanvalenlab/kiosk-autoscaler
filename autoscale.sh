@@ -10,6 +10,7 @@ function initialize_parameters() {
   #keysPerPod=5
   #minPods=${MIN_PODS:-0}
   #maxPods=${MAX_PODS:-4}
+  OLD_VERSION_HASH=$(kubectl version | sha1sum )
 }
 
 function parse_parameters() {
@@ -29,26 +30,15 @@ function debug() {
 function getCurrentPods() {
   # Retry up to 5 times if kubectl fails
   for i in $(seq 5); do
-    #debug "$(date) -- debug -- debug test"
-
     if [ "$resource_type" == "deployment" ]; then
         pod_checking_keyword=desired
     elif [ "$resource_type" == "job" ]; then
         pod_checking_keyword=Parallelism
     fi
-    #debug "$(date) -- debug -- $(kubectl -n $namespace describe $resource_type $deployment | grep 'Parallelism')"
-    current=25 #resetting current
     current=$(kubectl -n $namespace describe $resource_type $deployment | \
       grep "$pod_checking_keyword" | awk '{print $2}' | head -n1)
-    #if [ "$resource_type" == "job" ]; then
-    #    debug "$(date) -- debug -- current training parallelism: $(echo $current)"
-    #fi
-
-    #if [[ $current != "" ]]; then
-    #  debug "$(date) -- debug -- debugging current assignment: $(echo $current)"
     echo $current
     return 0
-    #fi
 
     sleep 3
   done
@@ -84,6 +74,7 @@ function prevent_intermediate_scaledown() {
     if [[ $desiredPods -eq 0 ]]; then
       :
     else
+      #debug "$(date) -- debug -- preventing intermediate scaledown"
       desiredPods=$currentPods
     fi
   fi
@@ -91,51 +82,24 @@ function prevent_intermediate_scaledown() {
 
 function scale_and_log() {
   if [[ $scale -eq 0 ]]; then
-  # To slow down the scale-down policy, scale down in steps (reduce 10% on every iteration)
-  #if [[ $desiredPods -lt $currentPods ]]; then
-  #  desiredPods=$(awk "BEGIN { print int( ($currentPods - $desiredPods) * 0.9 + $desiredPods ) }")
-  #fi
-    if [[ "$requiredPods" -ne "$currentPods" ]]; then
+    if [[ "$desiredPods" -ne "$currentPods" ]]; then
       output_debug_info
+      scale_pods
     fi
-    scale_pods
-    #log_scaling_result
   fi
 }
 
 function scale_pods() {
   kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
-}
-
-function log_scaling_result() {
-  if [[ $? -eq 0 ]]; then
-    # Adjust logging and Slack notifications based on LOGS env and desiredPods number
-    log=false
-    avgPods=$(awk "BEGIN { print int( ($minPods + $maxPods) / 2 ) }")
-
-    if [[ $LOGS == "HIGH" ]]; then
-      log=true
-    elif [[ $LOGS == "MEDIUM" && ($desiredPods -eq $minPods || $desiredPods -eq $avgPods || $desiredPods -eq $maxPods) ]]; then
-      log=true
-    elif [[ $LOGS == "LOW" && ($desiredPods -eq $minPods || $desiredPods -eq $maxPods) ]]; then
-      log=true
-    fi
-
-    if $log ; then
-      #echo "$(date) -- Scaled $deployment to $desiredPods pods ($queueMessages msg in the Redis queue)"
-      :
-    fi
-  else
-    echo "$(date) -- Failed to scale $deployment pods."
-  fi
+  debug "$(date) -- debug -- scaled to $desiredPods pods"
 }
 
 function get_keys() {
+  # TODO: resolve ambiguity between zipkeys and trainkeys (both use .zip files)
   # find out how many of the keys we retrieved were zip files, how many were
   # images, and how many were, regardless of their file type, expired
   imageKeys=0
   zipKeys=0
-  trainKeys=0
   for key in $queueKeys
   do
     key_status=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key status)
@@ -143,25 +107,22 @@ function get_keys() {
       file_name=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key file_name)
       if [[ $file_name =~ ^.+\.zip$ ]]; then
         ((zipKeys++))
-      elif [[ $file_name =~ ^predict.+$ ]]; then
+      else
         ((imageKeys++))
-      elif [[ $file_name =~ ^train.+$ ]]; then
-        ((trainKeys++))
       fi
-    else 
-      :
     fi
   done
+  #debug "$(date) -- debug -- zipkeys: $zipKeys"
+  #debug "$(date) -- debug -- imagekeys: $imageKeys"
 }
 
 function determine_required_pods() {
   # and determine how many pods we need.
   imagePods=$(echo "$imageKeys/$keysPerPod" | bc 2> /dev/null)
   zipPods=$(echo "$zipKeys/$keysPerPod" | bc 2> /dev/null)
-  trainPods=$(echo "$trainKeys/$keysPerPod" | bc 2> /dev/null)
 
   # Does this deployment revolve around zip files or image files?
-  # Note that the answer could vary for predictoin-related eployments, but htat 
+  # Note that the answer could vary for prediction-related deployments, but that 
   # all training-related deployments use zip files.
   if [ "$predict_or_train" == "predict" ]; then
     if [[ "$deployment" == "zip-consumer-deployment" ]]; then
@@ -170,7 +131,7 @@ function determine_required_pods() {
       requiredPods=$imagePods
     fi
   else
-    requiredPods=$trainPods
+    requiredPods=$zipPods
   fi
 
   # If we don't have enough jobs to fill up an entire pod, should we still provision one?
@@ -198,52 +159,24 @@ function output_debug_info() {
   debug "$(date) -- debug -- current pods: $currentPods"
 }
 
-function do_need_pods() {
+function adjust_pods() {
   # find out how many pods we've already requested.
-  debug "$(date) -- debug -- 0deployment name: $deployment"
   currentPods=$(getCurrentPods)
-  #debug "$(date) -- debug -- current number of pods: $currentPods"
-
   # If we already have some pods requested
-  debug "$(date) -- debug -- 0current pods: $currentPods"
-  debug "$(date) -- debug -- 0required pods: $requiredPods"
   if [[ $currentPods != "" ]]; then
     # and the amount we need is different from what we already have requested
     if [[ "$requiredPods" -ne "$currentPods" ]]; then
-      #debug "$(date) -- debug -- need to change numer of pods, but to what?"
       # Determine how many pods we need, taking into account scaling limits.
-      debug "$(date) -- debug -- 1current pods: $currentPods"
       verify_mins_and_maxes
       # For the time being, let's prevent scaledown, unless it's a complete scaledown
-      debug "$(date) -- debug -- 2current pods: $currentPods"
       prevent_intermediate_scaledown
       # If appropriate, go ahead and scale.
-      debug "$(date) -- debug -- 3current pods: $currentPods"
       scale_and_log
-    else
-      #debug "$(date) -- debug -- apparently don't need more pods"
-      :
     fi
   else
     echo "$(date) -- Failed to get current pods number for $deployment."
   fi
 }
-
-function dont_need_pods() {
-  #echo "$(date) -- Don't need any pods for $deployment."
-  if [[ $minPods -eq 0 ]]; then
-    if [[ "$requiredPods" -ne "$currentPods" ]]; then
-      output_debug_info
-    fi
-    desiredPods=$requiredPods
-    kubectl scale -n $namespace --replicas=$desiredPods $resource_type/$deployment 1> /dev/null
-    #echo "$(date) -- So we scaled down to 0."
-  else
-    #echo "$(date) -- But we have to keep a minimum number of pods."
-    :
-  fi
-}
-
 
 #
 # Main loop
@@ -251,11 +184,29 @@ function dont_need_pods() {
 function main_loop() {
 while true; do
 
+  # check cluster version
+  # if cluster has been upgraded recently, let's not touch the pod replica numbers for a minute
+  # in order to allow the Redis database time to fully reload
+  NEW_VERSION_GREP_TIMEOUT=$(kubectl version | grep timeout)
+  NEW_VERSION_GREP_REFUSED=$(kubectl version | grep refused)
+  # does cluster show keywords indicative of a broken connection to the master node?
+  if [ -z "$NEW_VERSION_GREP_TIMEOUT" ]; then
+    if [ -z "$NEW_VERSION_GREP_REFUSED" ]; then
+      # we are connected to master, so...
+      NEW_VERSION_HASH=$(kubectl version | sha1sum)
+      if [ "$OLD_VERSION_HASH" == "$NEW_VERSION_HASH" ]; then
+        OLD_VERSION_HASH=${NEW_VERSION_HASH}
+      else
+        sleep 900
+        OLD_VERSION_HASH=${NEW_VERSION_HASH}
+      fi
+    fi
+  fi
+
   for autoscaler in "${autoscalingArr[@]}"; do
     IFS='|' read minPods maxPods keysPerPod namespace resource_type predict_or_train deployment <<< "$autoscaler"
     # the "resource_type" field is meant to indicate whether a given resource is a deployment or a job
     # the "predict_or_train" field is meant to indicate whether a given deployment deals with training or prediction
-
 
     # Retrieve all keys
     if [ "$predict_or_train" == "predict" ]; then
@@ -268,19 +219,10 @@ while true; do
     if [[ $? -eq 0 ]]; then
       get_keys
       determine_required_pods
-
-      # Now, do we need one or more pods?
-      if [[ $requiredPods -ge 1 ]]; then
-        do_need_pods
-      else
-        dont_need_pods
-      fi
+      adjust_pods
     else
       echo "$(date) -- Failed to get entries from Redis for $deployment."
     fi
-    #debug "$(date) -- debug --"
-    #debug "$(date) -- debug --"
-    #debug "$(date) -- debug --"
     #debug "$(date) -- debug --"
   done
 
