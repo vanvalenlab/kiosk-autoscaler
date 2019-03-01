@@ -47,6 +47,13 @@ function getCurrentPods() {
 }
 
 function verify_mins_and_maxes() {
+  # For jobs, we may not want to have a maxPods.
+  # This can be denoted by setting maxPods=none.
+  if [[ "$maxPods" == "none" ]]; then
+    maxPods=((requiredPods+currentPods+1))
+    echo "Chosen max for this job: $maxPods"
+  fi
+
   # Determine how many pods we need, taking into account scaling limits.
   desiredPods=""
   # Flag used to prevent scaling down or up if currentPods are already min or max respectively.
@@ -72,7 +79,8 @@ function prevent_intermediate_scaledown() {
   # We're also inserting a check to prevent scaling down until we only want zero pods.
   if [[ $desiredPods -le $currentPods ]]; then
     if [[ $desiredPods -eq 0 ]]; then
-      :
+      #debug "$(date) -- debug -- preventing scaledown to zero"
+      desiredPods=$currentPods
     else
       #debug "$(date) -- debug -- preventing intermediate scaledown"
       desiredPods=$currentPods
@@ -193,14 +201,20 @@ while true; do
   if [ -z "$NEW_VERSION_GREP_TIMEOUT" ]; then
     if [ -z "$NEW_VERSION_GREP_REFUSED" ]; then
       # we are connected to master, so...
+      echo "We appear to be connected to master."
       NEW_VERSION_HASH=$(kubectl version | sha1sum)
       if [ "$OLD_VERSION_HASH" == "$NEW_VERSION_HASH" ]; then
-        OLD_VERSION_HASH=${NEW_VERSION_HASH}
+        echo "Cluster version hasn't changed."
       else
+        echo "Cluster version appears to have changed. Sleeping for 15 minutes."
         sleep 900
-        OLD_VERSION_HASH=${NEW_VERSION_HASH}
       fi
+      OLD_VERSION_HASH=${NEW_VERSION_HASH}
+    else
+      echo "Version checking encountered the word 'refused'!"
     fi
+  else
+    echo "Version checking encountered the word 'timeout'!"
   fi
 
   for autoscaler in "${autoscalingArr[@]}"; do
