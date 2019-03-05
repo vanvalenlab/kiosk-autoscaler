@@ -11,6 +11,7 @@ function initialize_parameters() {
   #minPods=${MIN_PODS:-0}
   #maxPods=${MAX_PODS:-4}
   OLD_VERSION_HASH=$(kubectl version | sha1sum )
+  OLD_VERSION=$(kubectl version)
 }
 
 function parse_parameters() {
@@ -114,18 +115,24 @@ function get_keys() {
   zipKeys=0
   for key in $queueKeys
   do
+    debug "$(date) -- debug -- for key $key"
     key_status=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key status)
+    debug "$(date) -- debug -- status is $key_status"
     if [[ "$key_status" != "done" && "$key_status" != "failed" ]]; then
       file_name=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT hget $key file_name)
       if [[ $file_name =~ ^.+\.zip$ ]]; then
         ((zipKeys++))
+        #debug "$(date) -- debug --   zip key"
       else
         ((imageKeys++))
+        #debug "$(date) -- debug --   image key"
       fi
+    else
+      : #debug "$(date) -- debug --    done key"
     fi
   done
-  #debug "$(date) -- debug -- zipkeys: $zipKeys"
-  #debug "$(date) -- debug -- imagekeys: $imageKeys"
+  debug "$(date) -- debug -- zipkeys: $zipKeys"
+  debug "$(date) -- debug -- imagekeys: $imageKeys"
 }
 
 function determine_required_pods() {
@@ -207,10 +214,13 @@ while true; do
       # we are connected to master, so...
       debug "$(date) -- info -- We appear to be connected to master."
       NEW_VERSION_HASH=$(kubectl version | sha1sum)
+      NEW_VERSION=$(kubectl version)
       if [ "$OLD_VERSION_HASH" == "$NEW_VERSION_HASH" ]; then
         debug "$(date) -- info -- Cluster version hasn't changed."
       else
         debug "$(date) -- info -- Cluster version appears to have changed. Sleeping for 15 minutes."
+        debug "$(date) -- info -- Old cluster version info: $OLD_VERSION"
+        debug "$(date) -- info -- New cluster version info: $NEW_VERSION"
         total_sleep_time=0
         while :; do
           sleep 15
@@ -223,6 +233,7 @@ while true; do
         debug "$(date) -- debug -- Done sleeping!"
       fi
       OLD_VERSION_HASH=${NEW_VERSION_HASH}
+      OLD_VERSION=${NEW_VERSION}
     else
       debug "$(date) -- warn -- Version checking encountered the word 'refused'!"
     fi
@@ -230,37 +241,46 @@ while true; do
     debug "$(date) -- warn -- Version checking encountered the word 'timeout'!"
   fi
 
-  for autoscaler in "${autoscalingArr[@]}"; do
-    IFS='|' read minPods maxPods keysPerPod namespace resource_type predict_or_train deployment <<< "$autoscaler"
-    # the "resource_type" field is meant to indicate whether a given resource is a deployment or a job
-    # the "predict_or_train" field is meant to indicate whether a given deployment deals with training or prediction
-
-    # Retrieve all keys
-    if [ "$predict_or_train" == "predict" ]; then
-      queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "predict_*")
-    elif [ "$predict_or_train" == "train" ]; then
-      queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "train_*")
-    fi
+  debug "$(date) -- debug -- Getting keys."
+  # Retrieve all keys
+  if [ "$predict_or_train" == "predict" ]; then
+    queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "predict_*")
+  elif [ "$predict_or_train" == "train" ]; then
+    queueKeys=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT keys "train_*")
+  fi
+  # then, if the last call was successful
+  if [[ $? -eq 0 ]]; then
+    get_keys
+    for autoscaler in "${autoscalingArr[@]}"; do
+      IFS='|' read minPods maxPods keysPerPod namespace resource_type predict_or_train deployment <<< "$autoscaler"
+      # the "resource_type" field is meant to indicate whether a given resource is a deployment or a job
+      # the "predict_or_train" field is meant to indicate whether a given deployment deals with training or prediction
   
-    # then, if the last call was successful
-    if [[ $? -eq 0 ]]; then
-      get_keys
-      determine_required_pods
-      adjust_pods
-    else
-      debug "$(date) -- warn -- Failed to get entries from Redis for $deployment."
-    fi
-  done
+      debug "$(date) -- debug -- Dealing with $deployment"
+        debug "$(date) -- debug -- Determining required pods."
+        determine_required_pods
+        debug "$(date) -- debug -- Adjusting pods."
+        adjust_pods
+        debug "$(date) -- debug -- Ready to sleep."
+    done
+  else
+    debug "$(date) -- warn -- Failed to get entries from Redis."
+  fi
 
   # We need to account for the long time it takes to start up a GPU instance.
   # A crude way of doing this is just to greatly lengthen the queue-checking
   # interval when GPUs are requested.
-  if [[ $desiredPods -gt 0 ]]; then
-    ADJUSTED_INTERVAL=360
-  else
-    ADJUSTED_INTERVAL=$INTERVAL
-  fi
+  # Actually, since the number of pods desired is determined by the number of keys in Redis,
+  # I don't htink there's any need for the interval lengthening. The presence or absence
+  # of pods at any given point in time doesn't alter the number of desired pods and, thus,
+  # the ultimate number of pods.
+  #if [[ $desiredPods -gt 0 ]]; then
+  #  ADJUSTED_INTERVAL=360
+  #else
+  #  ADJUSTED_INTERVAL=$INTERVAL
+  #fi
 
+  debug "$(date) -- debug -- Taking a wee nap for $INTERVAL seconds."
   sleep $INTERVAL
 done
 }
