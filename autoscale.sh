@@ -33,10 +33,14 @@ function getCurrentPods() {
     if [ "$resource_type" == "deployment" ]; then
         pod_checking_keyword=desired
     elif [ "$resource_type" == "job" ]; then
-        pod_checking_keyword=Parallelism
+        pod_checking_keyword=Completions
     fi
     current=$(kubectl -n $namespace describe $resource_type $deployment | \
       grep "$pod_checking_keyword" | awk '{print $2}' | head -n1)
+    # edge case for new jobs
+    if [ "$current" == "<unset>" ]; then
+      current=0
+    fi
     echo $current
     return 0
 
@@ -50,8 +54,8 @@ function verify_mins_and_maxes() {
   # For jobs, we may not want to have a maxPods.
   # This can be denoted by setting maxPods=none.
   if [[ "$maxPods" == "none" ]]; then
-    maxPods=((requiredPods+currentPods+1))
-    echo "Chosen max for this job: $maxPods"
+    maxPods=$((requiredPods+currentPods+1))
+    debug "$(date) -- debug -- Chosen max for this job: $maxPods"
   fi
 
   # Determine how many pods we need, taking into account scaling limits.
@@ -182,7 +186,7 @@ function adjust_pods() {
       scale_and_log
     fi
   else
-    echo "$(date) -- Failed to get current pods number for $deployment."
+    debug "$(date) -- warn -- Failed to get current pods number for $deployment."
   fi
 }
 
@@ -201,20 +205,29 @@ while true; do
   if [ -z "$NEW_VERSION_GREP_TIMEOUT" ]; then
     if [ -z "$NEW_VERSION_GREP_REFUSED" ]; then
       # we are connected to master, so...
-      echo "We appear to be connected to master."
+      debug "$(date) -- info -- We appear to be connected to master."
       NEW_VERSION_HASH=$(kubectl version | sha1sum)
       if [ "$OLD_VERSION_HASH" == "$NEW_VERSION_HASH" ]; then
-        echo "Cluster version hasn't changed."
+        debug "$(date) -- info -- Cluster version hasn't changed."
       else
-        echo "Cluster version appears to have changed. Sleeping for 15 minutes."
-        sleep 900
+        debug "$(date) -- info -- Cluster version appears to have changed. Sleeping for 15 minutes."
+        total_sleep_time=0
+        while :; do
+          sleep 15
+          total_sleep_time=$((total_sleep_time+15))
+          debug "$(date) -- debug -- Sleeping for $total_sleep_time seconds so far."
+          if [ "$total_sleep_time" -ge "900" ]; then
+              break
+          fi
+        done
+        debug "$(date) -- debug -- Done sleeping!"
       fi
       OLD_VERSION_HASH=${NEW_VERSION_HASH}
     else
-      echo "Version checking encountered the word 'refused'!"
+      debug "$(date) -- warn -- Version checking encountered the word 'refused'!"
     fi
   else
-    echo "Version checking encountered the word 'timeout'!"
+    debug "$(date) -- warn -- Version checking encountered the word 'timeout'!"
   fi
 
   for autoscaler in "${autoscalingArr[@]}"; do
@@ -235,9 +248,8 @@ while true; do
       determine_required_pods
       adjust_pods
     else
-      echo "$(date) -- Failed to get entries from Redis for $deployment."
+      debug "$(date) -- warn -- Failed to get entries from Redis for $deployment."
     fi
-    #debug "$(date) -- debug --"
   done
 
   # We need to account for the long time it takes to start up a GPU instance.
