@@ -59,16 +59,45 @@ class Autoscaler():
             autoscale_list = autoscale.split("|")
             self.autoscaling_params.append(autoscale_list)
 
+    def _make_kubectl_call(self, parameter_list):
+        while True:
+            try:
+                subprocess.run(parameter_list)
+                break
+            except CalledProcessError as err:
+                # For some reason, we can't execute this command right now.
+                # Keep trying until we can.
+                self._logger.warn("Trouble executing subprocess command " +
+                        "using parameters %s. Retrying. %s: %s",
+                        parameters_list, type(err).__name__, err)
+                time.sleep(5)
+
+    def _get_kubectl_output(self, parameter_list):
+        while True:
+            try:
+                pods_info = subprocess.check_output(parameter_list)
+                pods = pods_info.__str__()
+                break
+            except CalledProcessError as err:
+                # For some reason, we can't execute this command right now.
+                # Keep trying until we can.
+                self._logger.warn("Trouble executing subprocess command " +
+                        "using parameters %s. Retrying. %s: %s",
+                        parameters_list, type(err).__name__, err)
+                time.sleep(5)
+        return pods
+
     def _redis_keys(self):
         self.as_logger.debug("Getting all Redis keys.")
         while True:
             try:
                 self.all_redis_keys = self.redis_client.keys()
                 break
-            except ConnectionError:
+            except ConnectionError as err:
                 # For some reason, we're unable to connect to Redis right now.
                 # Keep trying until we can.
-                self.as_logger.warn("Trouble connecting to Redis. Retrying.")
+                self.as_logger.warn("Trouble connecting to Redis. Retrying." +
+                        " %s: %s", type(err).__name__, err)
                 time.sleep(5)
         self.as_logger.debug("Got all Redis keys.")
 
@@ -77,10 +106,11 @@ class Autoscaler():
             try:
                 key_values = self.redis_client.hgetall(key)
                 break
-            except ConnectionError:
+            except ConnectionError as err:
                 # For some reason, we're unable to connect to Redis right now.
                 # Keep trying until we can.
-                self.as_logger.warn("Trouble connecting to Redis. Retrying.")
+                self.as_logger.warn("Trouble connecting to Redis. Retrying." +
+                        " %s: %s", type(err).__name__, err)
                 time.sleep(5)
         return key_values
 
@@ -113,8 +143,9 @@ class Autoscaler():
             raise ValueError("The resource_type of " + str(resource_type) +
                     " is unsuitable. You need to use either " +
                     "\"deployment\" or \"job\".")
-        deployment_info = subprocess.check_output(["kubectl", "-n",
-            namespace, "describe", resource_type, deployment])
+        parameter_list = ["kubectl", "-n", namespace, "describe",
+                resource_type, deployment]
+        deployment_info = self._get_kubectl_output(parameter_list)
         deployment_str = str(deployment_info)[2:-1]
         dstr = deployment_str.encode('utf-8').decode('unicode_escape')
         depl_info_list = dstr.split("\n")
@@ -199,9 +230,10 @@ class Autoscaler():
                 self.as_logger.debug("    Scaling has been disabled for jobs.")
             else:
                 if desired_pods != current_pods:
-                    subprocess.run(["kubectl", "scale", "-n", namespace,
+                    parameter_list = ["kubectl", "scale", "-n", namespace,
                         "--replicas=" + str(desired_pods), resource_type +
-                        "/" + deployment])
+                        "/" + deployment]
+                    self._make_kubectl_call(parameter_list)
                     self.as_logger.debug("    Scaled " + deployment + " to " +
                             str(desired_pods) + " pods." )
                 else:
