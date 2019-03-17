@@ -205,7 +205,8 @@ class Autoscaler():
 
             # compute desired pods for this deployment
             desired_pods = redis_keys_for_this_deployment / keys_per_pod
-            desired_pods = round(desired_pods - 0.5)
+            # i had to ditch the round( x - 0.5) approach, due to "banker's rounding"
+            desired_pods = int(desired_pods // 1)
             if desired_pods > max_pods:
                 desired_pods = max_pods
             if desired_pods < min_pods:
