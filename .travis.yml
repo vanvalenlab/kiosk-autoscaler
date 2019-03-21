@@ -1,10 +1,36 @@
 sudo: false
-language: bash
-addons:
-  apt:
-    sources:
-    - sourceline: 'ppa:duggan/bats'
-    packages:
-    - bats
-    - bc
-script: bats /path/to/bats
+dist: trusty
+
+git:
+  depth: false
+
+language: python
+
+python:
+  - 2.7
+  - 3.5
+  - 3.6
+
+cache: pip
+
+install:
+  - pip install -r requirements.txt
+  - pip install pytest pytest-cov==2.5.1 pytest-pep8 coveralls
+
+script:
+  - python -m pytest --cov=autoscaler --pep8 autoscaler tests
+
+jobs:
+  include:
+    - stage: deploy
+      if: (branch = master OR branch =~ ^r[0-9]+.[0-9]+) AND type != pull_request
+      script:
+      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+      - docker build -t "$TRAVIS_REPO_SLUG" .
+      - docker images
+      - docker tag "$TRAVIS_REPO_SLUG" "$TRAVIS_REPO_SLUG":latest
+      - if [[ "$TRAVIS_BRANCH" != "master" ]] ; then docker tag "$TRAVIS_REPO_SLUG" "$TRAVIS_REPO_SLUG":"${TRAVIS_BRANCH#r}" ; fi
+      - docker push "$TRAVIS_REPO_SLUG"
+
+after_success:
+  - coveralls
