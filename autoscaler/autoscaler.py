@@ -226,13 +226,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 continue
 
             self.logger.debug('\tScaling %s', deployment)
-            self.logger.critical(entry)
 
             current_pods = self.get_current_pods(
                 namespace, resource_type, deployment)
-
-            self.logger.critical(entry)
-            raise
 
             # compute desired pods for this deployment
             desired_pods = self.get_desired_pods(

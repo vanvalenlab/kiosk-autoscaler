@@ -215,8 +215,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
         params = [deploy_params, job_params]
 
-        p = deployment_delim.join([param_delim.join(p) for p in deploy_params])
-        print(p)
+        p = deployment_delim.join([param_delim.join(p) for p in params])
         do_nothing = lambda x: 1
 
         deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
