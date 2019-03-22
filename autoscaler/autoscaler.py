@@ -35,8 +35,17 @@ import subprocess
 import redis
 
 
-class Autoscaler(object):
-    """Read Redis and scale up k8s pods if required"""
+class Autoscaler(object):  # pylint: disable=useless-object-inheritance
+    """Read Redis and scale up k8s pods if required.
+
+    Args:
+        redis_client: Redis Client Connection object.
+        scaling_config: string, joined lists of autoscaling configurations
+        backoff_seconds: int, after a redis/subprocess error, sleep for this
+            many seconds and retry the command.
+        deployment_delim: string, character delimiting deployment configs.
+        param_delim: string, character delimiting deployment config parameters.
+    """
 
     def __init__(self, redis_client, scaling_config, backoff_seconds=1,
                  deployment_delim=';', param_delim='|'):
