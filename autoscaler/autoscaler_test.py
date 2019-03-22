@@ -99,26 +99,8 @@ class DummyRedis(object):  # pylint: disable=useless-object-inheritance
             return rhash.split('_')[-1]
         return False
 
-    def hset(self, rhash, status, value):  # pylint: disable=W0613
-        return {status: value}
-
-    def type(self, key):  # pylint: disable=W0613
-        return 'hash'
-
 
 class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
-
-    def test__get_autoscaling_params(self):
-        deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
-        job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
-
-        params = [deploy_params, job_params]
-
-        with pytest.raises(ValueError):
-            param_delim = '|'
-            deployment_delim = '|'
-            p = deployment_delim.join([param_delim.join(p) for p in params])
-            autoscaler.Autoscaler(None, p, param_delim, deployment_delim)
 
     def test_hget(self):
         redis_client = DummyRedis(fail_tolerance=2)
@@ -170,19 +152,16 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
                          '1 total | 3 available | 0 unavailable\nmore\ntext\n'
         scaler._get_kubectl_output = lambda x: deploy_example
-
         deployed_pods = scaler.get_current_pods('ns', 'deployment', 'dep')
         assert deployed_pods == 4
 
         job_example = 'other\ntext\nCompletions:    33\nmore\ntext\n'
         scaler._get_kubectl_output = lambda x: job_example
-
         deployed_pods = scaler.get_current_pods('ns', 'job', 'dep')
         assert deployed_pods == 33
 
         job_example = 'other\ntext\nCompletions:  <unset>\nmore\ntext\n'
         scaler._get_kubectl_output = lambda x: job_example
-
         deployed_pods = scaler.get_current_pods('ns', 'job', 'dep')
         assert deployed_pods == 0
 
@@ -192,3 +171,62 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
                                        backoff_seconds=0.01)
         scaler.tally_keys()
         assert scaler.redis_keys == {'predict': 2, 'train': 2}
+
+    def test__scale_deployments(self):
+        redis_client = DummyRedis(fail_tolerance=2)
+        deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
+        job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
+
+        params = [deploy_params, job_params]
+
+        # same delimiter throws an error;
+        with pytest.raises(ValueError):
+            param_delim = '|'
+            deployment_delim = '|'
+            p = deployment_delim.join([param_delim.join(p) for p in params])
+            autoscaler.Autoscaler(None, p, 0, deployment_delim, param_delim)
+
+        # non-integer values will warn, but will not raise (or autoscale)
+        with pytest.raises(ValueError):
+            bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
+            param_delim = '|'
+            deployment_delim = ';'
+            p = deployment_delim.join([param_delim.join(bad_params)])
+            scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                           deployment_delim,
+                                           param_delim)
+            scaler._scale_deployments()
+
+        # bad resource_type
+        with pytest.raises(ValueError):
+            bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
+            param_delim = '|'
+            deployment_delim = ';'
+            p = deployment_delim.join([param_delim.join(bad_params)])
+            scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                           deployment_delim,
+                                           param_delim)
+            scaler._scale_deployments()
+
+        # test good delimiters and scaling params, bad resource_type
+        param_delim = '|'
+        deployment_delim = ';'
+        deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
+        job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
+        params = [deploy_params, job_params]
+
+        p = deployment_delim.join([param_delim.join(p) for p in deploy_params])
+        print(p)
+        do_nothing = lambda x: 1
+
+        deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
+                         '1 total | 3 available | 0 unavailable\nmore\ntext\n'
+        scaler._get_kubectl_output = lambda x: deploy_example
+
+        scaler.get_current_pods = do_nothing
+        scaler._make_kubectl_call = do_nothing
+        scaler.get_desired_pods = lambda x: 5
+        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                       deployment_delim,
+                                       param_delim)
+        # scaler._scale_deployments()

@@ -50,9 +50,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
     def __init__(self, redis_client, scaling_config, backoff_seconds=1,
                  deployment_delim=';', param_delim='|'):
         self.redis_client = redis_client
-        self.backoff_seconds = backoff_seconds
-        self.predict_keys = 0
-        self.train_keys = 0
+        self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
 
@@ -82,39 +80,33 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
 
-    def _make_kubectl_call(self, parameter_list):
-        self.logger.debug('Executing subprocess: `%s`.',
-                          ' '.join(parameter_list))
+    def _make_kubectl_call(self, args):
+        self.logger.debug('Executing subprocess: `%s`.', ' '.join(args))
         while True:
             try:
-                subprocess.run(parameter_list)
+                subprocess.run(args)
                 break
             except subprocess.CalledProcessError as err:
                 # Error during subprocess.  Log it and retry after `backoff
                 self.logger.warning('Encountered "%s: %s" during subprocess '
-                                    'command: `%s`.  Retrying in %s seconds...',
-                                    type(err).__name__, err,
-                                    ' '.join(parameter_list),
+                                    'command: `%s`.  Retrying in %s seconds.',
+                                    type(err).__name__, err, ' '.join(args),
                                     self.backoff_seconds)
                 time.sleep(self.backoff_seconds)
-        return True
 
-    def _get_kubectl_output(self, parameter_list):
-        self.logger.debug('Executing subprocess: `%s`.',
-                          ' '.join(parameter_list))
+    def _get_kubectl_output(self, args):
+        self.logger.debug('Executing subprocess: `%s`.', ' '.join(args))
         while True:
             try:
-                kubectl_output = subprocess.check_output(parameter_list)
+                kubectl_output = subprocess.check_output(args)
                 kubectl_output = kubectl_output.__str__()
                 break
             except subprocess.CalledProcessError as err:
                 # Error during subprocess.  Log it and retry after `backoff`
                 self.logger.warning('Encountered "%s: %s" during subprocess '
-                                    'command: `%s`.  Retrying in %s seconds...',
-                                    type(err).__name__, err,
-                                    ' '.join(parameter_list),
+                                    'command: `%s`.  Retrying in %s seconds.',
+                                    type(err).__name__, err, ' '.join(args),
                                     self.backoff_seconds)
-
                 time.sleep(self.backoff_seconds)
         return kubectl_output
 
@@ -234,9 +226,13 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 continue
 
             self.logger.debug('\tScaling %s', deployment)
+            self.logger.critical(entry)
 
             current_pods = self.get_current_pods(
                 namespace, resource_type, deployment)
+
+            self.logger.critical(entry)
+            raise
 
             # compute desired pods for this deployment
             desired_pods = self.get_desired_pods(
