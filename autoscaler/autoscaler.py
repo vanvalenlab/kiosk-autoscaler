@@ -153,12 +153,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             if any(re.match(k, key) for k in self.redis_keys):
                 status = self.hget(key, 'status')
 
-                if status is None:
-                    self.logger.warning('Key %s had no `status` field.', key)
-                    continue
-
                 # add up each type of key that is "in-progress" or "new"
-                elif status not in self.completed_statuses:
+                if status is not None and status not in self.completed_statuses:
                     for k in self.redis_keys:
                         if re.match(k, key):
                             self.redis_keys[k] += 1
