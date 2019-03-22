@@ -179,53 +179,50 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
 
         params = [deploy_params, job_params]
 
+        param_delim = '|'
+        deployment_delim = ';'
+
+        # non-integer values throws an error
+        with pytest.raises(ValueError):
+            bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
+            p = deployment_delim.join([param_delim.join(bad_params)])
+            scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                           deployment_delim, param_delim)
+            scaler._scale_deployments()
+
+        # not enough params will warn, but not raise (or autoscale)
+        bad_params = ['0', '1', '3', 'ns', 'job', 'train']
+        p = deployment_delim.join([param_delim.join(bad_params)])
+        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                       deployment_delim, param_delim)
+        scaler._scale_deployments()
+
+        # test bad resource_type
+        with pytest.raises(ValueError):
+            bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
+            p = deployment_delim.join([param_delim.join(bad_params)])
+            scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                           deployment_delim, param_delim)
+            scaler._scale_deployments()
+
+        # test good delimiters and scaling params, bad resource_type
+        deploy_params = ['0', '5', '1', 'ns', 'deployment', 'predict', 'name']
+        job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
+        params = [deploy_params, job_params]
+        p = deployment_delim.join([param_delim.join(p) for p in params])
+
+        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                       deployment_delim,
+                                       param_delim)
+        deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
+                         '1 total | 3 available | 0 unavailable\nmore\ntext\n'
+        scaler._get_kubectl_output = lambda x: deploy_example
+        scaler._make_kubectl_call = lambda x: True
+        scaler._scale_deployments()
+
         # same delimiter throws an error;
         with pytest.raises(ValueError):
             param_delim = '|'
             deployment_delim = '|'
             p = deployment_delim.join([param_delim.join(p) for p in params])
             autoscaler.Autoscaler(None, p, 0, deployment_delim, param_delim)
-
-        # non-integer values will warn, but will not raise (or autoscale)
-        with pytest.raises(ValueError):
-            bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
-            param_delim = '|'
-            deployment_delim = ';'
-            p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, 0,
-                                           deployment_delim,
-                                           param_delim)
-            scaler._scale_deployments()
-
-        # bad resource_type
-        with pytest.raises(ValueError):
-            bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
-            param_delim = '|'
-            deployment_delim = ';'
-            p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, 0,
-                                           deployment_delim,
-                                           param_delim)
-            scaler._scale_deployments()
-
-        # test good delimiters and scaling params, bad resource_type
-        param_delim = '|'
-        deployment_delim = ';'
-        deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
-        job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
-        params = [deploy_params, job_params]
-
-        p = deployment_delim.join([param_delim.join(p) for p in params])
-        do_nothing = lambda x: 1
-
-        deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
-                         '1 total | 3 available | 0 unavailable\nmore\ntext\n'
-        scaler._get_kubectl_output = lambda x: deploy_example
-
-        scaler.get_current_pods = do_nothing
-        scaler._make_kubectl_call = do_nothing
-        scaler.get_desired_pods = lambda x: 5
-        scaler = autoscaler.Autoscaler(redis_client, p, 0,
-                                       deployment_delim,
-                                       param_delim)
-        # scaler._scale_deployments()
