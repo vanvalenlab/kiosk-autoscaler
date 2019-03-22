@@ -66,6 +66,11 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             'train': 0
         }
 
+        self.pod_keywords = {
+            'deployment': 'desired',
+            'job': 'Completions'
+        }
+
     def _get_autoscaling_params(self, scaling_config,
                                 deployment_delim=';',
                                 param_delim='|'):
@@ -162,12 +167,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def get_current_pods(self, namespace, resource_type, deployment):
         """Find the number of current pods deployed for the given resource"""
-        # if resource_type  == 'deployment':
-        #     pod_checking_keyword = 'desired'
-        # elif resource_type == 'job':
-        #     pod_checking_keyword = 'Completions'
-        # else:
-        if resource_type not in {'deployment', 'job'}:
+        # pod_checking_keyword = self.pod_keywords.get(resource_type)
+        if resource_type not in self.pod_keywords:
             raise ValueError('The resource_type of {} is unsuitable. Use either'
                              '`deployment` or `job`'.format(resource_type))
 
