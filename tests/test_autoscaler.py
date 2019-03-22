@@ -1,9 +1,51 @@
+# Copyright 2016-2019 The Van Valen Lab at the California Institute of
+# Technology (Caltech), with support from the Paul Allen Family Foundation,
+# Google, & National Institutes of Health (NIH) under Grant U24CA224309-01.
+# All rights reserved.
+#
+# Licensed under a modified Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.github.com/vanvalenlab/kiosk-autoscaler/LICENSE
+#
+# The Work provided may be used for non-commercial academic purposes only.
+# For any other use of the Work, including commercial use, please contact:
+# vanvalenlab@gmail.com
+#
+# Neither the name of Caltech nor the names of its contributors may be used
+# to endorse or promote products derived from this software without specific
+# prior written permission.
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ============================================================================
+"""Tests for the Autoscaler class"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import numpy as np
+import redis
+import pytest
+
+import autoscaler
+
+
 class DummyRedis(object):
-    def __init__(self, prefix='predict', status='new'):
+    def __init__(self, prefix='predict', status='new', fail_tolerance=0):
         self.prefix = '/'.join(x for x in prefix.split('/') if x)
         self.status = status
+        self.fail_count = 0
+        self.fail_tolerance = fail_tolerance
 
     def keys(self):
+        if self.fail_count < self.fail_tolerance:
+            self.fail_count += 1
+            raise redis.exceptions.ConnectionError('thrown on purpose')
         return [
             '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
             '{}_{}_{}'.format(self.prefix, 'other', 'x.zip'),
@@ -12,6 +54,23 @@ class DummyRedis(object):
             '{}_{}_{}'.format(self.prefix, 'other', 'x.tiff'),
             '{}_{}_{}'.format('other', self.status, 'x.zip'),
         ]
+
+    def scan_iter(self, match=None):
+        if self.fail_count < self.fail_tolerance:
+            self.fail_count += 1
+            raise redis.exceptions.ConnectionError('thrown on purpose')
+
+        keys = [
+            '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
+            '{}_{}_{}'.format(self.prefix, 'other', 'x.zip'),
+            '{}_{}_{}'.format('other', self.status, 'x.TIFF'),
+            '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
+            '{}_{}_{}'.format(self.prefix, 'other', 'x.tiff'),
+            '{}_{}_{}'.format('other', self.status, 'x.zip'),
+        ]
+        if match:
+            return (k for k in keys if k.startswith(match[:-1]))
+        return (k for k in keys)
 
     def expected_keys(self, suffix=None):
         for k in self.keys():
@@ -24,10 +83,10 @@ class DummyRedis(object):
                     else:
                         yield k
 
-    def hmset(self, rhash, hvals):  # pylint: disable=W0613
-        return hvals
-
     def hget(self, rhash, field):
+        if self.fail_count < self.fail_tolerance:
+            self.fail_count += 1
+            raise redis.exceptions.ConnectionError('thrown on purpose')
         if field == 'status':
             return rhash.split('_')[1]
         elif field == 'file_name':
@@ -41,122 +100,66 @@ class DummyRedis(object):
     def hset(self, rhash, status, value):  # pylint: disable=W0613
         return {status: value}
 
-    def hgetall(self, rhash):  # pylint: disable=W0613
-        return {
-                b'identity_outputting':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'identity_predicting':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'identity_started':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'identity_upload':
-                b'bucket-monitor-deployment-6c85bd58f8-tzfjn',
-                b'model_version':
-                b'0',
-                b'output_url':
-                b'https://storage.googleapis.com/deepcell-output-benchmarking/output/6e33c4e2ac2d7a4bbb5b75d5c6b299a5.zip',
-                b'outputting_to_output_time':
-                b'0.668991943359375',
-                b'postprocess_function':
-                b'watershed',
-                b'postprocess_to_outputting_time':
-                b'8.20991015625',
-                b'start_to_preprocessing_time':
-                b'0.218984619140625',
-                b'timestamp_post-processing':
-                b'1552909111738.856',
-                b'timestamp_predicting':
-                b'1552909106910.563',
-                b'preprocessing_to_predicting_time':
-                b'0.0022021484375',
-                b'predicting_to_postprocess_time':
-                b'4.82829296875',
-                b'timestamp_preprocessing':
-                b'1552909106908.3608',
-                b'identity_post-processing':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'timestamp_started':
-                b'1552909106689.3762',
-                b'upload_to_start_time':
-                b'2940.002716064453',
-                b'timestamp_outputting':
-                b'1552909119948.766',
-                b'status':
-                b'done',
-                b'identity_preprocessing':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'timestamp_last_status_update':
-                b'1552909120617.758',
-                b'timestamp_output':
-                b'1552909120617.758',
-                b'url':
-                b'https://storage.googleapis.com/deepcell-output-benchmarking/uploads/directupload_watershednuclearnofgbg41f16_0_watershed_0_qwbenchmarking100000special_image_0.png',
-                b'input_file_name':
-                b'uploads/directupload_watershednuclearnofgbg41f16_0_watershed_0_qwbenchmarking100000special_image_0.png',
-                b'cuts':
-                b'0',
-                b'output_file_name':
-                b'output/6e33c4e2ac2d7a4bbb5b75d5c6b299a5.zip',
-                b'identity_output':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'timestamp_upload':
-                b'1552906166686.6602',
-                b'model_name':
-                b'watershednuclearnofgbg41f16'}
-
     def type(self, key):  # pylint: disable=W0613
         return 'hash'
 
+
 class TestAutoscaler(object):
 
-    # if there's only 1 key, then we need to see
-    # 1 redis-consumer
-    # 1 data-processing
-    # 1 tf-serving
-    # 0 training-job
-    def one_redis_entry(self):
-        dumb_redis = DummyRedis()
-        keys = dumb_redis.keys()
+    def test__get_autoscaling_params(self):
+        deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
+        job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
 
-        autoscaler = autoscale.Autoscaler()
-        autoscaler.redis_client = dumb_redis
-        autoscaler.redis_client.keys = lambda x: {
-                b'start_to_preprocessing_time':
-                b'0.218984619140625',
-                b'identity_upload':
-                b'bucket-monitor-deployment-6c85bd58f8-tzfjn',
-                b'identity_predicting':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'identity_started':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'timestamp_predicting':
-                b'1552909106910.563',
-                b'postprocess_function':
-                b'watershed',
-                b'model_version':
-                b'0',
-                b'preprocessing_to_predicting_time':
-                b'0.0022021484375',
-                b'timestamp_preprocessing':
-                b'1552909106908.3608',
-                b'timestamp_started':
-                b'1552909106689.3762',
-                b'upload_to_start_time':
-                b'2940.002716064453',
-                b'status':
-                b'done',
-                b'identity_preprocessing':
-                b'redis-consumer-deployment-868d8596bb-mz57w',
-                b'timestamp_last_status_update':
-                b'1552909120617.758',
-                b'url':
-                b'https://storage.googleapis.com/deepcell-output-benchmarking/uploads/directupload_watershednuclearnofgbg41f16_0_watershed_0_qwbenchmarking100000special_image_0.png',
-                b'input_file_name':
-                b'uploads/directupload_watershednuclearnofgbg41f16_0_watershed_0_qwbenchmarking100000special_image_0.png',
-                b'cuts':
-                b'0',
-                b'timestamp_upload':
-                b'1552906166686.6602',
-                b'model_name':
-                b'watershednuclearnofgbg41f16'}
-        assert True
+        params = [deploy_params, job_params]
+
+        with pytest.raises(ValueError):
+            param_delim = '|'
+            deployment_delim = '|'
+            p = deployment_delim.join([param_delim.join(p) for p in params])
+            autoscaler.Autoscaler(None, p, param_delim, deployment_delim)
+
+    def test_hget(self):
+        redis_client = DummyRedis(fail_tolerance=2)
+        scaler = autoscaler.Autoscaler(redis_client, 'None',
+                                       backoff_seconds=0.01)
+        data = scaler.hget('rhash_new', 'status')
+        assert data == 'new'
+        assert scaler.redis_client.fail_count == redis_client.fail_tolerance
+
+    def test_scan_iter(self):
+        prefix = 'predict'
+        redis_client = DummyRedis(fail_tolerance=2, prefix=prefix)
+        scaler = autoscaler.Autoscaler(redis_client, 'None',
+                                       backoff_seconds=0.01)
+        data = scaler.scan_iter(match=prefix)
+        keys = [k for k in data]
+        expected = [k for k in redis_client.keys() if k.startswith(prefix)]
+        assert scaler.redis_client.fail_count == redis_client.fail_tolerance
+        np.testing.assert_array_equal(keys, expected)
+
+    def test_get_desired_pods(self):
+        # key, keys_per_pod, min_pods, max_pods, current_pods
+        redis_client = DummyRedis(fail_tolerance=2)
+        scaler = autoscaler.Autoscaler(redis_client, 'None',
+                                       backoff_seconds=0.01)
+        scaler.redis_keys['predict'] = 10
+        # desired_pods is > max_pods
+        desired_pods = scaler.get_desired_pods('predict', 2, 0, 2, 1)
+        assert desired_pods == 2
+        # desired_pods is < min_pods
+        desired_pods = scaler.get_desired_pods('predict', 5, 9, 10, 0)
+        assert desired_pods == 9
+        # desired_pods is in range
+        desired_pods = scaler.get_desired_pods('predict', 3, 0, 5, 1)
+        assert desired_pods == 3
+        # desired_pods is in range, current_pods exist
+        desired_pods = scaler.get_desired_pods('predict', 10, 0, 5, 3)
+        assert desired_pods == 3
+
+    def test_get_current_pods(self):
+        redis_client = DummyRedis(fail_tolerance=2)
+        scaler = autoscaler.Autoscaler(redis_client, 'None',
+                                       backoff_seconds=0.01)
+
+        with pytest.raises(ValueError):
+            scaler.get_current_pods('namespace', 'badval', 'deployment')
