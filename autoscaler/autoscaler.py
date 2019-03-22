@@ -253,11 +253,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                     self.logger.debug('\tDeployment %s stays at %s pods.',
                                       deployment, current_pods)
 
-            else:
-                raise ValueError('The resource_type of {} is unsuitable. '
-                                 'Use either `deployment` or `job`'.format(
-                                     resource_type))
-
     def scale(self):
         self.tally_keys()
         self._scale_deployments()
