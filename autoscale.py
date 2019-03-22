@@ -42,7 +42,7 @@ import redis
 import autoscaler
 
 
-def initialize_logger(debug_mode=False):
+def initialize_logger(debug_mode=True):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
@@ -50,7 +50,7 @@ def initialize_logger(debug_mode=False):
     console = logging.StreamHandler(stream=sys.stdout)
     console.setFormatter(formatter)
 
-    fh = logging.FileHandler('redis-janitor.log')
+    fh = logging.FileHandler('autoscaler.log')
     fh.setFormatter(formatter)
 
     if debug_mode:
