@@ -35,7 +35,8 @@ import pytest
 import autoscaler
 
 
-class DummyRedis(object):
+class DummyRedis(object):  # pylint: disable=useless-object-inheritance
+
     def __init__(self, prefix='predict', status='new', fail_tolerance=0):
         self.prefix = '/'.join(x for x in prefix.split('/') if x)
         self.status = status
@@ -48,11 +49,11 @@ class DummyRedis(object):
             raise redis.exceptions.ConnectionError('thrown on purpose')
         return [
             '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.zip'),
-            '{}_{}_{}'.format('other', self.status, 'x.TIFF'),
+            '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
+            '{}_{}_{}'.format('train', self.status, 'x.TIFF'),
             '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.tiff'),
-            '{}_{}_{}'.format('other', self.status, 'x.zip'),
+            '{}_{}_{}'.format(self.prefix, 'done', 'x.tiff'),
+            '{}_{}_{}'.format('train', self.status, 'x.zip'),
         ]
 
     def scan_iter(self, match=None):
@@ -62,11 +63,12 @@ class DummyRedis(object):
 
         keys = [
             '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.zip'),
-            '{}_{}_{}'.format('other', self.status, 'x.TIFF'),
+            '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
+            '{}_{}_{}'.format('train', self.status, 'x.TIFF'),
             '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.tiff'),
-            '{}_{}_{}'.format('other', self.status, 'x.zip'),
+            '{}_{}_{}'.format(self.prefix, 'done', 'x.tiff'),
+            '{}_{}_{}'.format('train', self.status, 'x.zip'),
+            'malformedKey'
         ]
         if match:
             return (k for k in keys if k.startswith(match[:-1]))
@@ -104,7 +106,7 @@ class DummyRedis(object):
         return 'hash'
 
 
-class TestAutoscaler(object):
+class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def test__get_autoscaling_params(self):
         deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
@@ -161,5 +163,32 @@ class TestAutoscaler(object):
         scaler = autoscaler.Autoscaler(redis_client, 'None',
                                        backoff_seconds=0.01)
 
+        # test invalid resource_type
         with pytest.raises(ValueError):
-            scaler.get_current_pods('namespace', 'badval', 'deployment')
+            scaler.get_current_pods('namespace', 'bad_type', 'deployment')
+
+        deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
+                         '1 total | 3 available | 0 unavailable\nmore\ntext\n'
+        scaler._get_kubectl_output = lambda x: deploy_example
+
+        deployed_pods = scaler.get_current_pods('ns', 'deployment', 'dep')
+        assert deployed_pods == 4
+
+        job_example = 'other\ntext\nCompletions:    33\nmore\ntext\n'
+        scaler._get_kubectl_output = lambda x: job_example
+
+        deployed_pods = scaler.get_current_pods('ns', 'job', 'dep')
+        assert deployed_pods == 33
+
+        job_example = 'other\ntext\nCompletions:  <unset>\nmore\ntext\n'
+        scaler._get_kubectl_output = lambda x: job_example
+
+        deployed_pods = scaler.get_current_pods('ns', 'job', 'dep')
+        assert deployed_pods == 0
+
+    def test_tally_keys(self):
+        redis_client = DummyRedis(fail_tolerance=2)
+        scaler = autoscaler.Autoscaler(redis_client, 'None',
+                                       backoff_seconds=0.01)
+        scaler.tally_keys()
+        assert scaler.redis_keys == {'predict': 2, 'train': 2}
