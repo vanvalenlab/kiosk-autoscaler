@@ -169,6 +169,7 @@ class Autoscaler(object):
             'kubectl', '-n', namespace, 'describe', resource_type, deployment
         ])
 
+        current_pods = 0
         dstr = str(description)[2:-1].encode('utf-8').decode('unicode_escape')
         for line in dstr.split('\n'):
             if resource_type == 'deployment':
@@ -187,9 +188,6 @@ class Autoscaler(object):
                 if potential_match is not None:
                     current_pods = potential_match.group(1)
                     break
-
-        if resource_type == 'job' and current_pods == '<unset>':
-            current_pods = 0
 
         self.logger.debug('%s %s in namespace %s currently has %s pods.',
                           str(resource_type).capitalize(), deployment,
