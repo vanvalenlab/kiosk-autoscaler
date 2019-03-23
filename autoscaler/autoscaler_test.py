@@ -219,6 +219,9 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         scaler._get_kubectl_output = lambda x: deploy_example
         scaler._make_kubectl_call = lambda x: True
         scaler.scale_deployments()
+        # test desired_pods == current_pods
+        scaler.get_desired_pods = lambda *x: 4
+        scaler.scale_deployments()
 
         # same delimiter throws an error;
         with pytest.raises(ValueError):

@@ -83,12 +83,13 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def _make_kubectl_call(self, args):
         argstring = ' '.join(args)
-        self.logger.debug('Executing: `%s`.', argstring)
+        count = 0
+        start = timeit.default_timer()
         while True:
             try:
-                start = timeit.default_timer()
                 subprocess.run(args)
-                self.logger.debug('Executed `%s` in %s seconds.', argstring,
+                self.logger.debug('Executed `%s` (%s retries) in %s seconds.',
+                                  argstring, count,
                                   timeit.default_timer() - start)
                 break
             except subprocess.CalledProcessError as err:
@@ -97,17 +98,19 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                                     'command: `%s`.  Retrying in %s seconds.',
                                     type(err).__name__, err, argstring,
                                     self.backoff_seconds)
+                count += 1
                 time.sleep(self.backoff_seconds)
 
     def _get_kubectl_output(self, args):
         argstring = ' '.join(args)
-        self.logger.debug('Executing: `%s`.', argstring)
+        count = 0
+        start = timeit.default_timer()
         while True:
             try:
-                start = timeit.default_timer()
                 kubectl_output = subprocess.check_output(args)
                 kubectl_output = kubectl_output.decode('utf8')
-                self.logger.debug('Executed `%s` in %s seconds.', argstring,
+                self.logger.debug('Executed `%s` (%s retries) in %s seconds.',
+                                  count, argstring,
                                   timeit.default_timer() - start)
                 break
             except subprocess.CalledProcessError as err:
@@ -116,6 +119,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                                     'command: `%s`.  Retrying in %s seconds.',
                                     type(err).__name__, err, argstring,
                                     self.backoff_seconds)
+                count += 1
                 time.sleep(self.backoff_seconds)
         return kubectl_output
 
@@ -146,6 +150,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         return response
 
     def tally_keys(self):
+        start = timeit.default_timer()
         # reset the key tallies to 0
         for k in self.redis_keys:
             self.redis_keys[k] = 0
@@ -160,7 +165,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                         if re.match(k, key):
                             self.redis_keys[k] += 1
 
-        self.logger.debug('Finished tallying redis keys: %s', self.redis_keys)
+        self.logger.debug('Finished tallying redis keys in %s seconds.',
+                          timeit.default_timer() - start)
+        self.logger.info('Tallied redis keys: %s', self.redis_keys)
 
     def get_current_pods(self, namespace, resource_type, deployment):
         """Find the number of current pods deployed for the given resource"""
@@ -195,10 +202,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 if potential_match is not None:
                     current_pods = potential_match.group(1)
                     break
-
-        self.logger.debug('%s %s in namespace %s currently has %s pods.',
-                          str(resource_type).capitalize(), deployment,
-                          namespace, current_pods)
 
         return int(current_pods)
 
@@ -244,23 +247,27 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 predict_or_train, keys_per_pod,
                 min_pods, max_pods, current_pods)
 
-            # scale pods, if necessary
+            self.logger.debug('%s %s in namespace %s has a current state of %s'
+                              ' pods and a desired state of %s pods.',
+                              str(resource_type).capitalize(), deployment,
+                              namespace, current_pods, desired_pods)
+
+            if desired_pods == current_pods:
+                continue  # no scaling action is required
+
             if resource_type == 'job':
                 # TODO: Find a suitable method for scaling jobs
-                self.logger.debug('Scaling has been disabled for Jobs.')
+                self.logger.debug('Job scaling has been temporarily disabled.')
+                continue
 
             elif resource_type == 'deployment':
-                if desired_pods != current_pods:
-                    self._make_kubectl_call([
-                        'kubectl', 'scale', '-n', namespace,
-                        '--replicas={}'.format(desired_pods),
-                        '{}/{}'.format(resource_type, deployment)
-                    ])
-                    self.logger.debug('Scaled %s to %s pods.',
-                                      deployment, desired_pods)
-                else:
-                    self.logger.debug('Deployment %s stays at %s pods.',
-                                      deployment, current_pods)
+                self._make_kubectl_call([
+                    'kubectl', 'scale', '-n', namespace,
+                    '--replicas={}'.format(desired_pods),
+                    '{}/{}'.format(resource_type, deployment)
+                ])
+                self.logger.info('Successfully scaled %s from %s to %s pods.',
+                                 deployment, current_pods, desired_pods)
 
     def scale(self):
         self.tally_keys()
