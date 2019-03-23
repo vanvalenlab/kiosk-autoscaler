@@ -172,7 +172,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         scaler.tally_keys()
         assert scaler.redis_keys == {'predict': 2, 'train': 2}
 
-    def test__scale_deployments(self):
+    def test_scale_deployments(self):
         redis_client = DummyRedis(fail_tolerance=2)
         deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
         job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
@@ -188,14 +188,14 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
             p = deployment_delim.join([param_delim.join(bad_params)])
             scaler = autoscaler.Autoscaler(redis_client, p, 0,
                                            deployment_delim, param_delim)
-            scaler._scale_deployments()
+            scaler.scale_deployments()
 
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
         p = deployment_delim.join([param_delim.join(bad_params)])
         scaler = autoscaler.Autoscaler(redis_client, p, 0,
                                        deployment_delim, param_delim)
-        scaler._scale_deployments()
+        scaler.scale_deployments()
 
         # test bad resource_type
         with pytest.raises(ValueError):
@@ -203,7 +203,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
             p = deployment_delim.join([param_delim.join(bad_params)])
             scaler = autoscaler.Autoscaler(redis_client, p, 0,
                                            deployment_delim, param_delim)
-            scaler._scale_deployments()
+            scaler.scale_deployments()
 
         # test good delimiters and scaling params, bad resource_type
         deploy_params = ['0', '5', '1', 'ns', 'deployment', 'predict', 'name']
@@ -218,7 +218,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
                          '1 total | 3 available | 0 unavailable\nmore\ntext\n'
         scaler._get_kubectl_output = lambda x: deploy_example
         scaler._make_kubectl_call = lambda x: True
-        scaler._scale_deployments()
+        scaler.scale_deployments()
 
         # same delimiter throws an error;
         with pytest.raises(ValueError):

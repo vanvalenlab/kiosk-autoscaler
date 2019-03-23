@@ -218,7 +218,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return desired_pods
 
-    def _scale_deployments(self):
+    def scale_deployments(self):
         for entry in self.autoscaling_params:
             # entry schema: minPods maxPods keysPerPod namespace resource_type
             #               predict_or_train deployment
@@ -264,4 +264,4 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def scale(self):
         self.tally_keys()
-        self._scale_deployments()
+        self.scale_deployments()
