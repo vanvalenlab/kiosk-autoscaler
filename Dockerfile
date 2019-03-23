@@ -1,16 +1,17 @@
-FROM ubuntu:18.04
+FROM python:3.6
 
-RUN apt-get update && apt-get install -y \
-    bc \
-    curl \
-    redis-server \
-    vim
+RUN apt-get update && apt-get install -y curl
 
 RUN cd /usr/local/bin \
     && curl -O https://storage.googleapis.com/kubernetes-release/release/v1.6.2/bin/linux/amd64/kubectl \
     && chmod 755 /usr/local/bin/kubectl
 
-COPY ./autoscale.sh /bin/autoscale.sh
-RUN chmod +x /bin/autoscale.sh
+WORKDIR /usr/src/app
 
-CMD ["bash","/bin/autoscale.sh"]
+COPY requirements.txt .
+
+RUN pip install -r requirements.txt
+
+COPY . .
+
+CMD ["python", "autoscale.py"]

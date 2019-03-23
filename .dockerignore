@@ -1,0 +1,19 @@
+# git files
+.git
+
+# generated files
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+
+# virtualenv files
+env/
+venv/
+VENV/
+ENV/
+.env
+.venv
+
+# pycache
+__pycache__
