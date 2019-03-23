@@ -29,6 +29,7 @@ from __future__ import print_function
 
 import re
 import time
+import timeit
 import logging
 import subprocess
 
@@ -81,31 +82,39 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 for x in scaling_config.split(deployment_delim)]
 
     def _make_kubectl_call(self, args):
-        self.logger.debug('Executing subprocess: `%s`.', ' '.join(args))
+        argstring = ' '.join(args)
+        self.logger.debug('Executing: `%s`.', argstring)
         while True:
             try:
+                start = timeit.default_timer()
                 subprocess.run(args)
+                self.logger.debug('Executed `%s` in %s seconds.', argstring,
+                                  timeit.default_timer() - start)
                 break
             except subprocess.CalledProcessError as err:
                 # Error during subprocess.  Log it and retry after `backoff
                 self.logger.warning('Encountered "%s: %s" during subprocess '
                                     'command: `%s`.  Retrying in %s seconds.',
-                                    type(err).__name__, err, ' '.join(args),
+                                    type(err).__name__, err, argstring,
                                     self.backoff_seconds)
                 time.sleep(self.backoff_seconds)
 
     def _get_kubectl_output(self, args):
-        self.logger.debug('Executing subprocess: `%s`.', ' '.join(args))
+        argstring = ' '.join(args)
+        self.logger.debug('Executing: `%s`.', argstring)
         while True:
             try:
+                start = timeit.default_timer()
                 kubectl_output = subprocess.check_output(args)
-                kubectl_output = kubectl_output.__str__()
+                kubectl_output = kubectl_output.decode('utf8')
+                self.logger.debug('Executed `%s` in %s seconds.', argstring,
+                                  timeit.default_timer() - start)
                 break
             except subprocess.CalledProcessError as err:
                 # Error during subprocess.  Log it and retry after `backoff`
                 self.logger.warning('Encountered "%s: %s" during subprocess '
                                     'command: `%s`.  Retrying in %s seconds.',
-                                    type(err).__name__, err, ' '.join(args),
+                                    type(err).__name__, err, argstring,
                                     self.backoff_seconds)
                 time.sleep(self.backoff_seconds)
         return kubectl_output
@@ -168,8 +177,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         ])
 
         current_pods = 0
-        dstr = str(description)[2:-1].encode('utf-8').decode('unicode_escape')
-        for line in dstr.split('\n'):
+        # dstr = str(description)[2:-1].encode('utf-8').decode('unicode_escape')
+        for line in description.splitlines():
             if resource_type == 'deployment':
                 potential_match = re.match(deployment_re, line)
                 if potential_match is not None:
@@ -225,7 +234,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 self.logger.error('Autoscaling entry %s is malformed.', entry)
                 continue
 
-            self.logger.debug('\tScaling %s', deployment)
+            self.logger.debug('Scaling %s', deployment)
 
             current_pods = self.get_current_pods(
                 namespace, resource_type, deployment)
@@ -247,10 +256,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                         '--replicas={}'.format(desired_pods),
                         '{}/{}'.format(resource_type, deployment)
                     ])
-                    self.logger.debug('\tScaled %s to %s pods.',
+                    self.logger.debug('Scaled %s to %s pods.',
                                       deployment, desired_pods)
                 else:
-                    self.logger.debug('\tDeployment %s stays at %s pods.',
+                    self.logger.debug('Deployment %s stays at %s pods.',
                                       deployment, current_pods)
 
     def scale(self):
