@@ -110,7 +110,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 kubectl_output = subprocess.check_output(args)
                 kubectl_output = kubectl_output.decode('utf8')
                 self.logger.debug('Executed `%s` (%s retries) in %s seconds.',
-                                  count, argstring,
+                                  argstring, count,
                                   timeit.default_timer() - start)
                 break
             except subprocess.CalledProcessError as err:
