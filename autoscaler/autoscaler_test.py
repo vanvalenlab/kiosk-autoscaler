@@ -182,13 +182,12 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         param_delim = '|'
         deployment_delim = ';'
 
-        # non-integer values throws an error
-        with pytest.raises(ValueError):
-            bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
-            p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, 0,
-                                           deployment_delim, param_delim)
-            scaler.scale_deployments()
+        # non-integer values will warn, but not raise (or autoscale)
+        bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
+        p = deployment_delim.join([param_delim.join(bad_params)])
+        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+                                       deployment_delim, param_delim)
+        scaler.scale_deployments()
 
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']

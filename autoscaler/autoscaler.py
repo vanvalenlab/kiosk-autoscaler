@@ -233,7 +233,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 resource_type = str(entry[4])
                 predict_or_train = str(entry[5])
                 deployment = str(entry[6])
-            except IndexError:
+            except (IndexError, ValueError):
                 self.logger.error('Autoscaling entry %s is malformed.', entry)
                 continue
 
