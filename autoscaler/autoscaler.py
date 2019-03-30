@@ -171,7 +171,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                           timeit.default_timer() - start)
         self.logger.info('Tallied redis keys: %s', self.redis_keys)
 
-    def get_current_pods(self, namespace, resource_type, deployment):
+    def get_current_pods(self, namespace, resource_type, deployment,
+                         only_running=False):
         """Find the number of current pods deployed for the given resource"""
         # pod_checking_keyword = self.pod_keywords.get(resource_type)
         if resource_type not in self.pod_keywords:
@@ -179,7 +180,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                              '`deployment` or `job`'.format(resource_type))
 
         deployment_re = r'Replicas:\s+([0-9]+) desired | [0-9]+ updated | ' + \
-                        r'[0-9]+ total | [0-9]+ available | [0-9]+ unavailable'
+                        r'[0-9]+ total | ([0-9]+) available | [0-9]+ unavailable'
 
         description = self._get_kubectl_output([
             'kubectl', '-n', namespace, 'describe', resource_type, deployment
@@ -191,7 +192,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             if resource_type == 'deployment':
                 potential_match = re.match(deployment_re, line)
                 if potential_match is not None:
-                    current_pods = potential_match.group(1)
+                    if only_running:
+                        current_pods = potential_match.group(2)
+                    else:
+                        current_pods = potential_match.group(1)
                     break
 
             elif resource_type == 'job':
@@ -216,7 +220,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         if deployment in autoscaled_deployments:
             tf_serving_pods = self.get_current_pods(
-                'deepcell', 'deployment', 'tf-serving-deployment')
+                'deepcell', 'deployment', 'tf-serving-deployment',
+                only_running=True)
             new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
             self.tf_serving_pods = tf_serving_pods
             extra_pods = new_tf_serving_pods * \
