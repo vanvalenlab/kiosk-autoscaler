@@ -129,19 +129,19 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         scaler.redis_keys['predict'] = 10
         # desired_pods is > max_pods
         desired_pods = scaler.get_desired_pods(
-            'tf-serving-deployment','predict', 2, 0, 2, 1)
+            'tf-serving-deployment', 'predict', 2, 0, 2, 1)
         assert desired_pods == 2
         # desired_pods is < min_pods
         desired_pods = scaler.get_desired_pods(
-            'tf-serving-deployment','predict', 5, 9, 10, 0)
+            'tf-serving-deployment', 'predict', 5, 9, 10, 0)
         assert desired_pods == 9
         # desired_pods is in range
         desired_pods = scaler.get_desired_pods(
-            'tf-serving-deployment','predict', 3, 0, 5, 1)
+            'tf-serving-deployment', 'predict', 3, 0, 5, 1)
         assert desired_pods == 3
         # desired_pods is in range, current_pods exist
         desired_pods = scaler.get_desired_pods(
-            'tf-serving-deployment','predict', 10, 0, 5, 3)
+            'tf-serving-deployment', 'predict', 10, 0, 5, 3)
         assert desired_pods == 3
 
     def test_get_current_pods(self):
