@@ -70,6 +70,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             'job': 'Completions'
         }
 
+        self.tf_serving_pods = 0
+
     def _get_autoscaling_params(self, scaling_config,
                                 deployment_delim=';',
                                 param_delim='|'):
@@ -205,19 +207,34 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return int(current_pods)
 
-    def get_desired_pods(self, key, keys_per_pod, min_pods, max_pods, current_pods):
-        desired_pods = self.redis_keys[key] // keys_per_pod
+    def get_desired_pods(self, deployment, key, keys_per_pod, min_pods,
+            max_pods, current_pods):
+        autoscaled_deployments = {
+                'redis-consumer-deployment':7
+                'zip-consumer-deployment':1
+                'data-processing-deployment':1}
 
-        # set `desired_pods` to inside the max/min boundaries.
-        if desired_pods > max_pods:
-            desired_pods = max_pods
-        elif desired_pods < min_pods:
-            desired_pods = min_pods
+        if deployment in autoscaled_deployments:
+            tf_serving_pods = self.get_current_pods(
+                    'deepcell','deployment','tf-serving-deployment')
+            new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
+            self.tf_serving_pods = tf_serving_pods
+            extra_pods = new_tf_serving_pods * \
+                    autoscaled_deployments[deployment]
+            desired_pods = current_pods + extra_pods
+        else:
+            desired_pods = self.redis_keys[key] // keys_per_pod
 
-        # To avoid removing currently running pods, wait until all
-        # pods of the deployment are idle before scaling down.
-        if 0 < desired_pods < current_pods:
-            desired_pods = current_pods
+            # set `desired_pods` to inside the max/min boundaries.
+            if desired_pods > max_pods:
+                desired_pods = max_pods
+            elif desired_pods < min_pods:
+                desired_pods = min_pods
+
+            # To avoid removing currently running pods, wait until all
+            # pods of the deployment are idle before scaling down.
+            if 0 < desired_pods < current_pods:
+                desired_pods = current_pods
 
         return desired_pods
 
@@ -244,7 +261,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             # compute desired pods for this deployment
             desired_pods = self.get_desired_pods(
-                predict_or_train, keys_per_pod,
+                deployment, predict_or_train, keys_per_pod,
                 min_pods, max_pods, current_pods)
 
             self.logger.debug('%s %s in namespace %s has a current state of %s'
