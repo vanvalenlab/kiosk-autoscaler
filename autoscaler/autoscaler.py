@@ -179,8 +179,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             raise ValueError('The resource_type of {} is unsuitable. Use either'
                              '`deployment` or `job`'.format(resource_type))
 
-        deployment_re = r'Replicas:\s+([0-9]+) desired | [0-9]+ updated | ' + \
-                        r'[0-9]+ total | ([0-9]+) available | [0-9]+ unavailable'
+        deployment_re = r'Replicas:\s+([0-9]+) desired \| [0-9]+ updated \| ' + \
+                        r'[0-9]+ total \| ([0-9]+) available \| [0-9]+ unavailable'
 
         description = self._get_kubectl_output([
             'kubectl', '-n', namespace, 'describe', resource_type, deployment
