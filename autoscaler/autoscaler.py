@@ -210,8 +210,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
     def get_desired_pods(self, deployment, key, keys_per_pod, min_pods,
             max_pods, current_pods):
         autoscaled_deployments = {
-                'redis-consumer-deployment':7
-                'zip-consumer-deployment':1
+                'redis-consumer-deployment':7,
+                'zip-consumer-deployment':1,
                 'data-processing-deployment':1}
 
         if deployment in autoscaled_deployments:
