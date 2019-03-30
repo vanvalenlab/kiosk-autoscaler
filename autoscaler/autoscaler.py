@@ -208,19 +208,19 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         return int(current_pods)
 
     def get_desired_pods(self, deployment, key, keys_per_pod, min_pods,
-            max_pods, current_pods):
+                         max_pods, current_pods):
         autoscaled_deployments = {
-                'redis-consumer-deployment':7,
-                'zip-consumer-deployment':1,
-                'data-processing-deployment':1}
+            'redis-consumer-deployment': 7,
+            'zip-consumer-deployment': 1,
+            'data-processing-deployment': 1}
 
         if deployment in autoscaled_deployments:
             tf_serving_pods = self.get_current_pods(
-                    'deepcell','deployment','tf-serving-deployment')
+                'deepcell', 'deployment', 'tf-serving-deployment')
             new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
             self.tf_serving_pods = tf_serving_pods
             extra_pods = new_tf_serving_pods * \
-                    autoscaled_deployments[deployment]
+                autoscaled_deployments[deployment]
             desired_pods = current_pods + extra_pods
         else:
             desired_pods = self.redis_keys[key] // keys_per_pod
