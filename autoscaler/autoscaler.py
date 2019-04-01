@@ -71,6 +71,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         }
 
         self.tf_serving_pods = 0
+        self.new_tf_serving_pods = 0
 
     def _get_autoscaling_params(self, scaling_config,
                                 deployment_delim=';',
@@ -219,12 +220,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             'data-processing-deployment': 1}
 
         if deployment in autoscaled_deployments:
-            tf_serving_pods = self.get_current_pods(
-                'deepcell', 'deployment', 'tf-serving-deployment',
-                only_running=True)
-            new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
-            self.tf_serving_pods = tf_serving_pods
-            extra_pods = new_tf_serving_pods * \
+            extra_pods = self.new_tf_serving_pods * \
                 autoscaled_deployments[deployment]
             desired_pods = current_pods + extra_pods
         else:
@@ -244,6 +240,12 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         return desired_pods
 
     def scale_deployments(self):
+        # some special logic surrounding the loop
+        # for tf-serving, the fixed-number deployment
+        tf_serving_pods = self.get_current_pods(
+            'deepcell', 'deployment', 'tf-serving-deployment',
+            only_running=True)
+        self.new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
         for entry in self.autoscaling_params:
             # entry schema: minPods maxPods keysPerPod namespace resource_type
             #               predict_or_train deployment
@@ -290,6 +292,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 ])
                 self.logger.info('Successfully scaled %s from %s to %s pods.',
                                  deployment, current_pods, desired_pods)
+        # update number of tf-serving pods for next iteration of loop
+        self.tf_serving_pods = tf_serving_pods
 
     def scale(self):
         self.tally_keys()
