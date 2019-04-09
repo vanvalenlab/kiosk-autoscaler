@@ -28,7 +28,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
 import redis
 import pytest
 
@@ -149,7 +148,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         keys = [k for k in data]
         expected = [k for k in redis_client.keys() if k.startswith(prefix)]
         assert scaler.redis_client.fail_count == redis_client.fail_tolerance
-        np.testing.assert_array_equal(keys, expected)
+        assert keys == expected
 
     def test_get_desired_pods(self):
         # key, keys_per_pod, min_pods, max_pods, current_pods
