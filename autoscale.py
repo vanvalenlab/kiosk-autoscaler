@@ -38,6 +38,7 @@ import time
 import sys
 
 import redis
+import kubernetes
 
 import autoscaler
 
@@ -55,10 +56,9 @@ def initialize_logger(debug_mode=True):
 
     if debug_mode:
         console.setLevel(logging.DEBUG)
-        fh.setLevel(logging.DEBUG)
     else:
         console.setLevel(logging.INFO)
-        fh.setLevel(logging.INFO)
+    fh.setLevel(logging.DEBUG)
 
     logger.addHandler(console)
     logger.addHandler(fh)
@@ -75,8 +75,14 @@ if __name__ == '__main__':
         decode_responses=True,
         charset='utf-8')
 
+    kubernetes.config.load_incluster_config()
+
+    KUBE_CLIENT = kubernetes.client.CoreV1Api(
+        kubernetes.client.ApiClient())
+
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
+        kube_client=KUBE_CLIENT,
         scaling_config=os.getenv('AUTOSCALING'),
         backoff_seconds=os.getenv('REDIS_INTERVAL', '1'))
 

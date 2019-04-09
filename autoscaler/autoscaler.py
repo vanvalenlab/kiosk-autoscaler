@@ -31,9 +31,9 @@ import re
 import time
 import timeit
 import logging
-import subprocess
 
 import redis
+import kubernetes
 
 
 class Autoscaler(object):  # pylint: disable=useless-object-inheritance
@@ -41,6 +41,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     Args:
         redis_client: Redis Client Connection object.
+        kube_client: Kubernetes Python Client object.
         scaling_config: string, joined lists of autoscaling configurations
         backoff_seconds: int, after a redis/subprocess error, sleep for this
             many seconds and retry the command.
@@ -48,9 +49,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         param_delim: string, character delimiting deployment config parameters.
     """
 
-    def __init__(self, redis_client, scaling_config, backoff_seconds=1,
-                 deployment_delim=';', param_delim='|'):
+    def __init__(self, redis_client, kube_client, scaling_config,
+                 backoff_seconds=1, deployment_delim=';', param_delim='|'):
         self.redis_client = redis_client
+        self.kube_client = kube_client
         self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
@@ -80,48 +82,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
-
-    def _make_kubectl_call(self, args):
-        argstring = ' '.join(args)
-        count = 0
-        start = timeit.default_timer()
-        while True:
-            try:
-                subprocess.run(args)
-                self.logger.debug('Executed `%s` (%s retries) in %s seconds.',
-                                  argstring, count,
-                                  timeit.default_timer() - start)
-                break
-            except subprocess.CalledProcessError as err:
-                # Error during subprocess.  Log it and retry after `backoff
-                self.logger.warning('Encountered "%s: %s" during subprocess '
-                                    'command: `%s`.  Retrying in %s seconds.',
-                                    type(err).__name__, err, argstring,
-                                    self.backoff_seconds)
-                count += 1
-                time.sleep(self.backoff_seconds)
-
-    def _get_kubectl_output(self, args):
-        argstring = ' '.join(args)
-        count = 0
-        start = timeit.default_timer()
-        while True:
-            try:
-                kubectl_output = subprocess.check_output(args)
-                kubectl_output = kubectl_output.decode('utf8')
-                self.logger.debug('Executed `%s` (%s retries) in %s seconds.',
-                                  argstring, count,
-                                  timeit.default_timer() - start)
-                break
-            except subprocess.CalledProcessError as err:
-                # Error during subprocess.  Log it and retry after `backoff`
-                self.logger.warning('Encountered "%s: %s" during subprocess '
-                                    'command: `%s`.  Retrying in %s seconds.',
-                                    type(err).__name__, err, argstring,
-                                    self.backoff_seconds)
-                count += 1
-                time.sleep(self.backoff_seconds)
-        return kubectl_output
 
     def scan_iter(self, match=None):
         while True:
@@ -169,38 +129,67 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                           timeit.default_timer() - start)
         self.logger.info('Tallied redis keys: %s', self.redis_keys)
 
+    def list_namespaced_deployment(self, namespace):
+        """Wrapper for `kubernetes.client.list_namespaced_deployment`"""
+        try:
+            response = self.kube_client.list_namespaced_deployment(namespace)
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.error('%s when calling `list_namespaced_deployment`: %s',
+                              type(err).__name__, err)
+            raise err
+        return response.items
+
+    def list_namespaced_job(self, namespace):
+        """Wrapper for `kubernetes.client.list_namespaced_job`"""
+        try:
+            response = self.kube_client.list_namespaced_job(namespace)
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.error('%s when calling `list_namespaced_job`: %s',
+                              type(err).__name__, err)
+            raise err
+        return response.items
+
+    def patch_namespaced_deployment(self, name, namespace, body):
+        """Wrapper for `kubernetes.client.patch_namespaced_deployment`"""
+        try:
+            response = self.kube_client.patch_namespaced_deployment(
+                name, namespace, body)
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.error('%s when calling `patch_namespaced_deployment`: '
+                              '%s', type(err).__name__, err)
+            raise err
+        return response
+
+    def patch_namespaced_job(self, name, namespace, body):
+        """Wrapper for `kubernetes.client.patch_namespaced_job`"""
+        try:
+            response = self.kube_client.patch_namespaced_deployment(
+                name, namespace, body)
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.error('%s when calling `patch_namespaced_job`: %s',
+                              type(err).__name__, err)
+            raise err
+        return response
+
     def get_current_pods(self, namespace, resource_type, deployment):
         """Find the number of current pods deployed for the given resource"""
-        # pod_checking_keyword = self.pod_keywords.get(resource_type)
         if resource_type not in self.pod_keywords:
             raise ValueError('The resource_type of {} is unsuitable. Use either'
                              '`deployment` or `job`'.format(resource_type))
 
-        deployment_re = r'Replicas:\s+([0-9]+) desired | [0-9]+ updated | ' + \
-                        r'[0-9]+ total | [0-9]+ available | [0-9]+ unavailable'
-
-        description = self._get_kubectl_output([
-            'kubectl', '-n', namespace, 'describe', resource_type, deployment
-        ])
-
         current_pods = 0
-        # dstr = str(description)[2:-1].encode('utf-8').decode('unicode_escape')
-        for line in description.splitlines():
-            if resource_type == 'deployment':
-                potential_match = re.match(deployment_re, line)
-                if potential_match is not None:
-                    current_pods = potential_match.group(1)
+        if resource_type == 'deployment':
+            deployments = self.list_namespaced_deployment(namespace)
+            for d in deployments:
+                if d.metadata.name == deployment:
+                    current_pods = d.spec.replicas
                     break
 
-            elif resource_type == 'job':
-                potential_match = re.match(r'Completions:\s+([0-9]+)', line)
-                # This works so long as we don't delete Redis keys after
-                # they've been procesed.
-                # If we do start deleting keys (queue system), then we'll need
-                # to also identify the "Succeeded" line and subtract that value
-                # from Completions.
-                if potential_match is not None:
-                    current_pods = potential_match.group(1)
+        elif resource_type == 'job':
+            jobs = self.list_namespaced_job(namespace)
+            for j in jobs:
+                if j.metadata.name == deployment:
+                    current_pods = j.spec.completions  # TODO: is this right?
                     break
 
         return int(current_pods)
@@ -237,7 +226,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 self.logger.error('Autoscaling entry %s is malformed.', entry)
                 continue
 
-            self.logger.debug('Scaling %s', deployment)
+            self.logger.debug('Scaling `%s`', deployment)
 
             current_pods = self.get_current_pods(
                 namespace, resource_type, deployment)
@@ -257,15 +246,12 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             if resource_type == 'job':
                 # TODO: Find a suitable method for scaling jobs
-                self.logger.debug('Job scaling has been temporarily disabled.')
-                continue
+                body = {'spec': {'completions': desired_pods}}
+                res = self.patch_namespaced_job(deployment, namespace, body)
 
             elif resource_type == 'deployment':
-                self._make_kubectl_call([
-                    'kubectl', 'scale', '-n', namespace,
-                    '--replicas={}'.format(desired_pods),
-                    '{}/{}'.format(resource_type, deployment)
-                ])
+                body = {'spec': {'replicas': desired_pods}}
+                res = self.patch_namespaced_deployment(deployment, namespace, body)
                 self.logger.info('Successfully scaled %s from %s to %s pods.',
                                  deployment, current_pods, desired_pods)
 
