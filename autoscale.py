@@ -77,8 +77,7 @@ if __name__ == '__main__':
 
     kubernetes.config.load_incluster_config()
 
-    KUBE_CLIENT = kubernetes.client.CoreV1Api(
-        kubernetes.client.ApiClient())
+    KUBE_CLIENT = kubernetes.client.AppsV1Api()
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
