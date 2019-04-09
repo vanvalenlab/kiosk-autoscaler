@@ -35,6 +35,11 @@ import pytest
 import autoscaler
 
 
+class Bunch(object):
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds)
+
+
 class DummyRedis(object):  # pylint: disable=useless-object-inheritance
 
     def __init__(self, prefix='predict', status='new', fail_tolerance=0):
@@ -100,11 +105,35 @@ class DummyRedis(object):  # pylint: disable=useless-object-inheritance
         return False
 
 
+class DummyKubernetes(object):
+
+    def list_namespaced_deployment(self, *args, **kwargs):
+        return Bunch(items=[
+            Bunch(spec=Bunch(replicas='4'), metadata=Bunch(name='pod1')),
+            Bunch(spec=Bunch(replicas='8'), metadata=Bunch(name='pod2'))
+        ])
+
+    def list_namespaced_job(self, *args, **kwargs):
+        return Bunch(items=[
+            Bunch(spec=Bunch(completions='1'), metadata=Bunch(name='pod1')),
+            Bunch(spec=Bunch(completions='2'), metadata=Bunch(name='pod2'))
+        ])
+
+    def patch_namespaced_deployment(self, *args, **kwargs):
+        return Bunch(items=[Bunch(spec=Bunch(replicas='4'),
+                                  metadata=Bunch(name='pod'))])
+
+    def patch_namespaced_job(self, *args, **kwargs):
+        return Bunch(items=[Bunch(spec=Bunch(completions='0'),
+                                  metadata=Bunch(name='pod'))])
+
+
 class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def test_hget(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        kube_client = DummyKubernetes()
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, 'None',
                                        backoff_seconds=0.01)
         data = scaler.hget('rhash_new', 'status')
         assert data == 'new'
@@ -113,7 +142,8 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
     def test_scan_iter(self):
         prefix = 'predict'
         redis_client = DummyRedis(fail_tolerance=2, prefix=prefix)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        kube_client = DummyKubernetes()
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, 'None',
                                        backoff_seconds=0.01)
         data = scaler.scan_iter(match=prefix)
         keys = [k for k in data]
@@ -124,7 +154,8 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
     def test_get_desired_pods(self):
         # key, keys_per_pod, min_pods, max_pods, current_pods
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        kube_client = DummyKubernetes()
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, 'None',
                                        backoff_seconds=0.01)
         scaler.redis_keys['predict'] = 10
         # desired_pods is > max_pods
@@ -142,38 +173,37 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def test_get_current_pods(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        kube_client = DummyKubernetes()
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, 'None',
                                        backoff_seconds=0.01)
 
         # test invalid resource_type
         with pytest.raises(ValueError):
-            scaler.get_current_pods('namespace', 'bad_type', 'deployment')
+            scaler.get_current_pods('namespace', 'bad_type', 'pod')
 
-        deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
-                         '1 total | 3 available | 0 unavailable\nmore\ntext\n'
-        scaler._get_kubectl_output = lambda x: deploy_example
-        deployed_pods = scaler.get_current_pods('ns', 'deployment', 'dep')
+        deployed_pods = scaler.get_current_pods('ns', 'deployment', 'pod1')
         assert deployed_pods == 4
 
-        job_example = 'other\ntext\nCompletions:    33\nmore\ntext\n'
-        scaler._get_kubectl_output = lambda x: job_example
-        deployed_pods = scaler.get_current_pods('ns', 'job', 'dep')
-        assert deployed_pods == 33
+        deployed_pods = scaler.get_current_pods('ns', 'deployment', 'pod2')
+        assert deployed_pods == 8
 
-        job_example = 'other\ntext\nCompletions:  <unset>\nmore\ntext\n'
-        scaler._get_kubectl_output = lambda x: job_example
-        deployed_pods = scaler.get_current_pods('ns', 'job', 'dep')
-        assert deployed_pods == 0
+        deployed_pods = scaler.get_current_pods('ns', 'job', 'pod1')
+        assert deployed_pods == 1
+
+        deployed_pods = scaler.get_current_pods('ns', 'job', 'pod2')
+        assert deployed_pods == 2
 
     def test_tally_keys(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        kube_client = DummyKubernetes()
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, 'None',
                                        backoff_seconds=0.01)
         scaler.tally_keys()
         assert scaler.redis_keys == {'predict': 2, 'train': 2}
 
     def test_scale_deployments(self):
         redis_client = DummyRedis(fail_tolerance=2)
+        kube_client = DummyKubernetes()
         deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
         job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
 
@@ -185,14 +215,15 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         # non-integer values will warn, but not raise (or autoscale)
         bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, p, 0,
                                        deployment_delim, param_delim)
         scaler.scale_deployments()
 
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, p, 0,
                                        deployment_delim, param_delim)
         scaler.scale_deployments()
 
@@ -200,7 +231,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         with pytest.raises(ValueError):
             bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
             p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, 0,
+            scaler = autoscaler.Autoscaler(redis_client, kube_client, p, 0,
                                            deployment_delim, param_delim)
             scaler.scale_deployments()
 
@@ -210,13 +241,9 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
-        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, kube_client, p, 0,
                                        deployment_delim,
                                        param_delim)
-        deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
-                         '1 total | 3 available | 0 unavailable\nmore\ntext\n'
-        scaler._get_kubectl_output = lambda x: deploy_example
-        scaler._make_kubectl_call = lambda x: True
         scaler.scale_deployments()
         # test desired_pods == current_pods
         scaler.get_desired_pods = lambda *x: 4
@@ -227,4 +254,4 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
             param_delim = '|'
             deployment_delim = '|'
             p = deployment_delim.join([param_delim.join(p) for p in params])
-            autoscaler.Autoscaler(None, p, 0, deployment_delim, param_delim)
+            autoscaler.Autoscaler(None, None, p, 0, deployment_delim, param_delim)
