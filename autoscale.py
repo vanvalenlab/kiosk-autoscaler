@@ -62,6 +62,7 @@ def initialize_logger(debug_mode=True):
 
     logger.addHandler(console)
     logger.addHandler(fh)
+    logging.getLogger('kubernetes.client.rest').setLevel(logging.INFO)
 
 
 if __name__ == '__main__':
