@@ -203,7 +203,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             jobs = self.list_namespaced_job(namespace)
             for j in jobs:
                 if j.metadata.name == deployment:
-                    current_pods = j.spec.completions  # TODO: is this right?
+                    current_pods = j.spec.parallelism  # TODO: is this right?
                     break
 
         return int(current_pods)
@@ -245,7 +245,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             current_pods = self.get_current_pods(
                 namespace, resource_type, deployment)
 
-            # compute desired pods for this deployment
             desired_pods = self.get_desired_pods(
                 predict_or_train, keys_per_pod,
                 min_pods, max_pods, current_pods)
@@ -260,8 +259,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             if resource_type == 'job':
                 # TODO: Find a suitable method for scaling jobs
-                body = {'spec': {'completions': desired_pods}}
                 res = self.patch_namespaced_job(deployment, namespace, body)
+                body = {'spec': {'parallelism': desired_pods}}
 
             elif resource_type == 'deployment':
                 body = {'spec': {'replicas': desired_pods}}
