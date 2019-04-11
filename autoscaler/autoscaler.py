@@ -50,8 +50,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         param_delim: string, character delimiting deployment config parameters.
     """
 
-    def __init__(self, redis_client, scaling_config,
-                 backoff_seconds=1, deployment_delim=';', param_delim='|'):
+    def __init__(self, redis_client, scaling_config, backoff_seconds=1,
+                 deployment_delim=';', param_delim='|'):
         self.redis_client = redis_client
         self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
