@@ -42,7 +42,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     Args:
         redis_client: Redis Client Connection object.
-        kube_client: Kubernetes Python Client object.
         scaling_config: string, joined lists of autoscaling configurations
         backoff_seconds: int, after a redis/subprocess error, sleep for this
             many seconds and retry the command.
