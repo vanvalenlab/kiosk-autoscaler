@@ -38,7 +38,6 @@ import time
 import sys
 
 import redis
-import kubernetes
 
 import autoscaler
 
@@ -76,13 +75,8 @@ if __name__ == '__main__':
         decode_responses=True,
         charset='utf-8')
 
-    kubernetes.config.load_incluster_config()
-
-    KUBE_CLIENT = kubernetes.client.AppsV1Api()
-
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
-        kube_client=KUBE_CLIENT,
         scaling_config=os.getenv('AUTOSCALING'),
         backoff_seconds=os.getenv('REDIS_INTERVAL', '1'))
 

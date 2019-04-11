@@ -50,10 +50,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         param_delim: string, character delimiting deployment config parameters.
     """
 
-    def __init__(self, redis_client, kube_client, scaling_config,
+    def __init__(self, redis_client, scaling_config,
                  backoff_seconds=1, deployment_delim=';', param_delim='|'):
         self.redis_client = redis_client
-        self.kube_client = kube_client
         self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
@@ -130,10 +129,21 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                           timeit.default_timer() - start)
         self.logger.info('Tallied redis keys: %s', self.redis_keys)
 
+    def get_apps_v1_client(self):
+        """Returns Kubernetes API Client for AppsV1Api"""
+        kubernetes.config.load_incluster_config()
+        return kubernetes.client.AppsV1Api()
+
+    def get_batch_v1_client(self):
+        """Returns Kubernetes API Client for AppsV1Api"""
+        kubernetes.config.load_incluster_config()
+        return kubernetes.client.BatchV1Api()
+
     def list_namespaced_deployment(self, namespace):
         """Wrapper for `kubernetes.client.list_namespaced_deployment`"""
         try:
-            response = self.kube_client.list_namespaced_deployment(namespace)
+            kube_client = self.get_apps_v1_client()
+            response = kube_client.list_namespaced_deployment(namespace)
         except kubernetes.client.rest.ApiException as err:
             self.logger.error('%s when calling `list_namespaced_deployment`: %s',
                               type(err).__name__, err)
@@ -143,7 +153,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
     def list_namespaced_job(self, namespace):
         """Wrapper for `kubernetes.client.list_namespaced_job`"""
         try:
-            response = self.kube_client.list_namespaced_job(namespace)
+            kube_client = self.get_batch_v1_client()
+            response = kube_client.list_namespaced_job(namespace)
         except kubernetes.client.rest.ApiException as err:
             self.logger.error('%s when calling `list_namespaced_job`: %s',
                               type(err).__name__, err)
@@ -153,7 +164,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
     def patch_namespaced_deployment(self, name, namespace, body):
         """Wrapper for `kubernetes.client.patch_namespaced_deployment`"""
         try:
-            response = self.kube_client.patch_namespaced_deployment(
+            kube_client = self.get_apps_v1_client()
+            response = kube_client.patch_namespaced_deployment(
                 name, namespace, body)
         except kubernetes.client.rest.ApiException as err:
             self.logger.error('%s when calling `patch_namespaced_deployment`: '
@@ -164,7 +176,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
     def patch_namespaced_job(self, name, namespace, body):
         """Wrapper for `kubernetes.client.patch_namespaced_job`"""
         try:
-            response = self.kube_client.patch_namespaced_deployment(
+            kube_client = self.get_batch_v1_client()
+            response = kube_client.patch_namespaced_deployment(
                 name, namespace, body)
         except kubernetes.client.rest.ApiException as err:
             self.logger.error('%s when calling `patch_namespaced_job`: %s',
