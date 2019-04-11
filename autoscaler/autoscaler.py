@@ -235,23 +235,23 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 namespace = str(entry[3])
                 resource_type = str(entry[4])
                 predict_or_train = str(entry[5])
-                deployment = str(entry[6])
+                name = str(entry[6])
             except (IndexError, ValueError):
                 self.logger.error('Autoscaling entry %s is malformed.', entry)
                 continue
 
-            self.logger.debug('Scaling `%s`', deployment)
+            self.logger.debug('Scaling `%s`', name)
 
             current_pods = self.get_current_pods(
-                namespace, resource_type, deployment)
+                namespace, resource_type, name)
 
             desired_pods = self.get_desired_pods(
                 predict_or_train, keys_per_pod,
                 min_pods, max_pods, current_pods)
 
-            self.logger.debug('%s %s in namespace %s has a current state of %s'
-                              ' pods and a desired state of %s pods.',
-                              str(resource_type).capitalize(), deployment,
+            self.logger.debug('%s `%s` in namespace `%s` has a current state '
+                              'of %s pods and a desired state of %s pods.',
+                              str(resource_type).capitalize(), name,
                               namespace, current_pods, desired_pods)
 
             if desired_pods == current_pods:
@@ -259,14 +259,18 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             if resource_type == 'job':
                 # TODO: Find a suitable method for scaling jobs
-                res = self.patch_namespaced_job(deployment, namespace, body)
                 body = {'spec': {'parallelism': desired_pods}}
+                res = self.patch_namespaced_job(name, namespace, body)
+                self.logger.info('Successfully scaled %s from %s to %s pods.',
+                                 name, current_pods, desired_pods)
 
             elif resource_type == 'deployment':
                 body = {'spec': {'replicas': desired_pods}}
-                res = self.patch_namespaced_deployment(deployment, namespace, body)
-                self.logger.info('Successfully scaled %s from %s to %s pods.',
-                                 deployment, current_pods, desired_pods)
+                res = self.patch_namespaced_deployment(name, namespace, body)
+
+            self.logger.info('Successfully scaled %s `%s` in namespace `%s` '
+                             'from %s to %s pods.', resource_type, name,
+                             namespace, current_pods, desired_pods)
 
     def scale(self):
         self.tally_keys()
