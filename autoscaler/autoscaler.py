@@ -61,7 +61,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             param_delim=param_delim)
 
         self.autoscaled_deployments = self._get_secondary_autoscaling_params(
-            scaling_config=secondary_scaling_config.rstrip(),
+            secondary_scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
@@ -100,9 +100,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         secondary_autoscaling_params = [x.split(param_delim)
                     for x in secondary_scaling_config.split(deployment_delim)]
         autoscaled_deployments = {}
-        for secondary_autoscaling in secondary_autoscaling_params:
-            autoscaled_deployments[secondary_autoscaling[0]] = \
-                secondary_autoscaling[1]
+        if len(secondary_autoscaling_params) > 1:
+            for secondary_autoscaling in secondary_autoscaling_params:
+                autoscaled_deployments[secondary_autoscaling[0]] = \
+                    secondary_autoscaling[1]
         return autoscaled_deployments
 
     def _make_kubectl_call(self, args):
