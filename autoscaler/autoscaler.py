@@ -97,9 +97,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                              'different. Got "{}" and "{}".'.format(
                                  deployment_delim, param_delim))
 
-        secondary_autoscaling_params = \
-                [x.split(param_delim) for x in
-                        secondary_scaling_config.split(deployment_delim)]
+        secondary_autoscaling_params = [x.split(param_delim) for x in
+                                        secondary_scaling_config.split(deployment_delim)]
         autoscaled_deployments = {}
         if len(secondary_autoscaling_params) > 1:
             for secondary_autoscaling in secondary_autoscaling_params:
