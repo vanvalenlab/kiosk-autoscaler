@@ -105,9 +105,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         ]
 
         autoscaled_deployments = {}
-        if len(secondary_autoscaling_params) > 1:
-            for s in secondary_autoscaling_params:
+        for s in secondary_autoscaling_params:
+            if len(s) > 1:
                 autoscaled_deployments[s[0]] = s[1]
+
         return autoscaled_deployments
 
     def scan_iter(self, match=None):
