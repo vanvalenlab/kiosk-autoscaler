@@ -48,8 +48,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         param_delim: string, character delimiting deployment config parameters.
     """
 
-    def __init__(self, redis_client, scaling_config, backoff_seconds=1,
-                 deployment_delim=';', param_delim='|'):
+    def __init__(self, redis_client, scaling_config, secondary_scaling_config,
+                 backoff_seconds=1, deployment_delim=';', param_delim='|'):
         self.redis_client = redis_client
         self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
@@ -57,6 +57,11 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         self.autoscaling_params = self._get_autoscaling_params(
             scaling_config=scaling_config.rstrip(),
+            deployment_delim=deployment_delim,
+            param_delim=param_delim)
+
+        self.autoscaled_deployments = self._get_secondary_autoscaling_params(
+            scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
@@ -83,6 +88,22 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
+
+    def _get_secondary_autoscaling_params(self, secondary_scaling_config,
+                                deployment_delim=';',
+                                param_delim='|'):
+        if deployment_delim == param_delim:
+            raise ValueError('`deployment_delim` and `param_delim` must be '
+                             'different. Got "{}" and "{}".'.format(
+                                 deployment_delim, param_delim))
+
+        secondary_autoscaling_params = [x.split(param_delim)
+                for x in secondary_scaling_config.split(deployment_delim)]
+        autoscaled_deployments = {}
+        for secondary_autoscaling in secondary_autoscaling_params:
+            autoscaled_deployments[ secondary_autoscaling[0] ] = \
+                    secondary_autoscaling[1]
+        return autoscaled_deployments
 
     def _make_kubectl_call(self, args):
         argstring = ' '.join(args)
@@ -214,12 +235,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def get_desired_pods(self, deployment, key, keys_per_pod, min_pods,
                          max_pods, current_pods):
-        autoscaled_deployments = {
-            'redis-consumer-deployment': 7,
-            'zip-consumer-deployment': 1,
-            'data-processing-deployment': 1}
-
-        if deployment in autoscaled_deployments:
+        if deployment in self.autoscaled_deployments:
             extra_pods = self.new_tf_serving_pods * \
                 autoscaled_deployments[deployment]
             desired_pods = current_pods + extra_pods
