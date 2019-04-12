@@ -235,6 +235,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                     current_pods = j.spec.parallelism  # TODO: is this right?
                     break
 
+        if current_pods is None:  # status.available_replicas may be None
+            current_pods = 0
+
         return int(current_pods)
 
     def get_desired_pods(self, deployment, key, keys_per_pod,
