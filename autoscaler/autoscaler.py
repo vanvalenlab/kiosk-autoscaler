@@ -75,8 +75,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             'job': 'Completions'
         }
 
-        self.tf_serving_pods = 0
-        self.new_tf_serving_pods = 0
+        self.previous_reference_pod_counts = {}
 
     def _get_autoscaling_params(self, scaling_config,
                                 deployment_delim=';',
@@ -194,7 +193,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                           timeit.default_timer() - start)
         self.logger.info('Tallied redis keys: %s', self.redis_keys)
 
-    def get_current_pods(self, namespace, resource_type, deployment,
+    def get_current_pods(self, resource_namespace, resource_type, resource_name,
                          only_running=False):
         """Find the number of current pods deployed for the given resource"""
         # pod_checking_keyword = self.pod_keywords.get(resource_type)
@@ -202,18 +201,19 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             raise ValueError('The resource_type of {} is unsuitable. Use either'
                              '`deployment` or `job`'.format(resource_type))
 
-        deployment_re = r'Replicas:\s+([0-9]+) desired \| [0-9]+ updated \| ' + \
+        resource_name_re = r'Replicas:\s+([0-9]+) desired \| [0-9]+ updated \| ' + \
                         r'[0-9]+ total \| ([0-9]+) available \| [0-9]+ unavailable'
 
         description = self._get_kubectl_output([
-            'kubectl', '-n', namespace, 'describe', resource_type, deployment
+            'kubectl', '-n', resource_namespace, 'describe',
+            resource_type, resource_name
         ])
 
         current_pods = 0
         # dstr = str(description)[2:-1].encode('utf-8').decode('unicode_escape')
         for line in description.splitlines():
             if resource_type == 'deployment':
-                potential_match = re.match(deployment_re, line)
+                potential_match = re.match(resource_name_re, line)
                 if potential_match is not None:
                     if only_running:
                         current_pods = potential_match.group(2)
@@ -234,11 +234,11 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return int(current_pods)
 
-    def get_desired_pods(self, deployment, key, keys_per_pod, min_pods,
+    def get_desired_pods(self, resource_name, key, keys_per_pod, min_pods,
                          max_pods, current_pods):
-        if deployment in self.autoscaled_deployments:
+        if resource_name in self.autoscaled_deployments:
             extra_pods = self.new_tf_serving_pods * \
-                autoscaled_deployments[deployment]
+                autoscaled_deployments[resource_name]
             desired_pods = current_pods + extra_pods
         else:
             desired_pods = self.redis_keys[key] // keys_per_pod
@@ -256,13 +256,41 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return desired_pods
 
-    def scale_deployments(self):
-        # some special logic surrounding the loop
-        # for tf-serving, the fixed-number deployment
-        tf_serving_pods = self.get_current_pods(
-            'deepcell', 'deployment', 'tf-serving-deployment',
-            only_running=True)
-        self.new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
+    def secondary_desired_pods(self, resource_name, reference_pods,
+            pods_per_reference_pod, min_pods, max_pods, current_pods):
+        desired_pods = current_pods + pods_per_reference_pod*reference_pods
+
+        # trim `desired_pods` to lay inside the max/min boundaries.
+        if desired_pods > max_pods:
+            desired_pods = max_pods
+        elif desired_pods < min_pods:
+            desired_pods = min_pods
+
+        # To avoid removing currently running pods, wait until all
+        # pods of the deployment are idle before scaling down.
+        if 0 < desired_pods < current_pods:
+            desired_pods = current_pods
+
+        return desired_pods
+
+    def scale_resource(desired_pods, current_pods, resource_type,
+                       resource_namespace, resource_name):
+        if desired_pods == current_pods:
+            continue  # no scaling action is required
+        if resource_type == 'job':
+            # TODO: Find a suitable method for scaling jobs
+            self.logger.debug('Job scaling has been temporarily disabled.')
+            continue
+        elif resource_type == 'deployment':
+            self._make_kubectl_call([
+                'kubectl', 'scale', '-n', resource_namespace,
+                '--replicas={}'.format(desired_pods),
+                '{}/{}'.format(resource_type, resource_name)
+            ])
+            self.logger.info('Successfully scaled %s from %s to %s pods.',
+                             resource_name, current_pods, desired_pods)
+
+    def scale_all_resources(self):
         for entry in self.autoscaling_params:
             # entry schema: minPods maxPods keysPerPod namespace resource_type
             #               predict_or_train deployment
@@ -270,48 +298,75 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 min_pods = int(entry[0])
                 max_pods = int(entry[1])
                 keys_per_pod = int(entry[2])
-                namespace = str(entry[3])
+                resource_namespace = str(entry[3])
                 resource_type = str(entry[4])
                 predict_or_train = str(entry[5])
-                deployment = str(entry[6])
+                resource_name = str(entry[6])
             except (IndexError, ValueError):
                 self.logger.error('Autoscaling entry %s is malformed.', entry)
                 continue
 
-            self.logger.debug('Scaling %s', deployment)
-
-            current_pods = self.get_current_pods(
-                namespace, resource_type, deployment)
+            self.logger.debug('Scaling %s', resource_name)
 
             # compute desired pods for this deployment
+            current_pods = self.get_current_pods(
+                resource_namespace, resource_type, resource_name)
             desired_pods = self.get_desired_pods(
-                deployment, predict_or_train, keys_per_pod,
+                resource_name, predict_or_train, keys_per_pod,
                 min_pods, max_pods, current_pods)
 
             self.logger.debug('%s %s in namespace %s has a current state of %s'
                               ' pods and a desired state of %s pods.',
-                              str(resource_type).capitalize(), deployment,
-                              namespace, current_pods, desired_pods)
+                              str(resource_type).capitalize(), resource_name,
+                              resource_namespace, current_pods, desired_pods)
 
-            if desired_pods == current_pods:
-                continue  # no scaling action is required
+            # scale pods
+            self.scale_resource(desired_pods, current_pods, resource_type,
+                                resource_namespace, resource_name):
 
-            if resource_type == 'job':
-                # TODO: Find a suitable method for scaling jobs
-                self.logger.debug('Job scaling has been temporarily disabled.')
+        for entry in self.secondary_autoscaling_params:
+            try:
+                resource_name = str(entry[0])
+                resource_type = str(entry[1])
+                resource_namespace = str(entry[2])
+                reference_resource_name = str(entry[3])
+                reference_resource_type = str(entry[4])
+                reference_resource_namespace = str(entry[5])
+                pods_per_other_pod = int(entry[6])
+                min_pods = int(entry[7])
+                max_pods = int(entry[8])
+            except (IndexError, ValueError):
+                self.logger.error('Autoscaling entry %s is malformed.', entry)
                 continue
 
-            elif resource_type == 'deployment':
-                self._make_kubectl_call([
-                    'kubectl', 'scale', '-n', namespace,
-                    '--replicas={}'.format(desired_pods),
-                    '{}/{}'.format(resource_type, deployment)
-                ])
-                self.logger.info('Successfully scaled %s from %s to %s pods.',
-                                 deployment, current_pods, desired_pods)
-        # update number of tf-serving pods for next iteration of loop
-        self.tf_serving_pods = tf_serving_pods
+            self.logger.debug('Secondary scaling for %s', deployment)
+
+            # keep track of how many reference pods we're working with
+            if not self.previous_reference_pod_counts[resource_name]:
+                self.previous_reference_pod_counts[resource_name] = 0
+            current_reference_pods = self.get_current_pods(
+                reference_resource_namespace,
+                reference_resource_type,
+                reference_resource_namespace,
+                only_running=True)
+            new_reference_pods = current_reference_pods - \
+                self.previous_reference_pod_counts[resource_name]
+            self.previous_reference_pod_counts[resource_name] = \
+                    new_reference_pods
+
+            # compute desired pods for this deployment
+            current_pods = self.get_current_pods(
+                resource_namespace, resource_type, resource_name)
+            desired_pods = self.secondary_desired_pods(self, resource_name,
+                                                       reference_pods,
+                                                       pods_per_reference_pod,
+                                                       min_pods, max_pods,
+                                                       current_pods)
+
+            # scale pods
+            self.scale_resource(desired_pods, current_pods, resource_type,
+                                resource_namespace, resource_name):
 
     def scale(self):
         self.tally_keys()
-        self.scale_deployments()
+        self.scale_all_resources()
