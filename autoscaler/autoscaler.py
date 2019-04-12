@@ -48,8 +48,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         param_delim: string, character delimiting deployment config parameters.
     """
 
-    def __init__(self, redis_client, scaling_config, backoff_seconds=1,
-                 deployment_delim=';', param_delim='|'):
+    def __init__(self, redis_client, scaling_config, secondary_scaling_config,
+                 backoff_seconds=1, deployment_delim=';', param_delim='|'):
         self.redis_client = redis_client
         self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
@@ -57,6 +57,11 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         self.autoscaling_params = self._get_autoscaling_params(
             scaling_config=scaling_config.rstrip(),
+            deployment_delim=deployment_delim,
+            param_delim=param_delim)
+
+        self.autoscaled_deployments = self._get_secondary_autoscaling_params(
+            secondary_scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
@@ -70,6 +75,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             'job': 'Completions'
         }
 
+        self.tf_serving_pods = 0
+        self.new_tf_serving_pods = 0
+
     def _get_autoscaling_params(self, scaling_config,
                                 deployment_delim=';',
                                 param_delim='|'):
@@ -80,6 +88,23 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
+
+    def _get_secondary_autoscaling_params(self, secondary_scaling_config,
+                                          deployment_delim=';',
+                                          param_delim='|'):
+        if deployment_delim == param_delim:
+            raise ValueError('`deployment_delim` and `param_delim` must be '
+                             'different. Got "{}" and "{}".'.format(
+                                 deployment_delim, param_delim))
+
+        secondary_autoscaling_params = [x.split(param_delim) for x in
+                                        secondary_scaling_config.split(deployment_delim)]
+        autoscaled_deployments = {}
+        if len(secondary_autoscaling_params) > 1:
+            for secondary_autoscaling in secondary_autoscaling_params:
+                autoscaled_deployments[secondary_autoscaling[0]] = \
+                    secondary_autoscaling[1]
+        return autoscaled_deployments
 
     def _make_kubectl_call(self, args):
         argstring = ' '.join(args)
@@ -169,15 +194,16 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                           timeit.default_timer() - start)
         self.logger.info('Tallied redis keys: %s', self.redis_keys)
 
-    def get_current_pods(self, namespace, resource_type, deployment):
+    def get_current_pods(self, namespace, resource_type, deployment,
+                         only_running=False):
         """Find the number of current pods deployed for the given resource"""
         # pod_checking_keyword = self.pod_keywords.get(resource_type)
         if resource_type not in self.pod_keywords:
             raise ValueError('The resource_type of {} is unsuitable. Use either'
                              '`deployment` or `job`'.format(resource_type))
 
-        deployment_re = r'Replicas:\s+([0-9]+) desired | [0-9]+ updated | ' + \
-                        r'[0-9]+ total | [0-9]+ available | [0-9]+ unavailable'
+        deployment_re = r'Replicas:\s+([0-9]+) desired \| [0-9]+ updated \| ' + \
+                        r'[0-9]+ total \| ([0-9]+) available \| [0-9]+ unavailable'
 
         description = self._get_kubectl_output([
             'kubectl', '-n', namespace, 'describe', resource_type, deployment
@@ -189,7 +215,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             if resource_type == 'deployment':
                 potential_match = re.match(deployment_re, line)
                 if potential_match is not None:
-                    current_pods = potential_match.group(1)
+                    if only_running:
+                        current_pods = potential_match.group(2)
+                    else:
+                        current_pods = potential_match.group(1)
                     break
 
             elif resource_type == 'job':
@@ -205,23 +234,35 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return int(current_pods)
 
-    def get_desired_pods(self, key, keys_per_pod, min_pods, max_pods, current_pods):
-        desired_pods = self.redis_keys[key] // keys_per_pod
+    def get_desired_pods(self, deployment, key, keys_per_pod, min_pods,
+                         max_pods, current_pods):
+        if deployment in self.autoscaled_deployments:
+            extra_pods = self.new_tf_serving_pods * \
+                autoscaled_deployments[deployment]
+            desired_pods = current_pods + extra_pods
+        else:
+            desired_pods = self.redis_keys[key] // keys_per_pod
 
-        # set `desired_pods` to inside the max/min boundaries.
-        if desired_pods > max_pods:
-            desired_pods = max_pods
-        elif desired_pods < min_pods:
-            desired_pods = min_pods
+            # set `desired_pods` to inside the max/min boundaries.
+            if desired_pods > max_pods:
+                desired_pods = max_pods
+            elif desired_pods < min_pods:
+                desired_pods = min_pods
 
-        # To avoid removing currently running pods, wait until all
-        # pods of the deployment are idle before scaling down.
-        if 0 < desired_pods < current_pods:
-            desired_pods = current_pods
+            # To avoid removing currently running pods, wait until all
+            # pods of the deployment are idle before scaling down.
+            if 0 < desired_pods < current_pods:
+                desired_pods = current_pods
 
         return desired_pods
 
     def scale_deployments(self):
+        # some special logic surrounding the loop
+        # for tf-serving, the fixed-number deployment
+        tf_serving_pods = self.get_current_pods(
+            'deepcell', 'deployment', 'tf-serving-deployment',
+            only_running=True)
+        self.new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
         for entry in self.autoscaling_params:
             # entry schema: minPods maxPods keysPerPod namespace resource_type
             #               predict_or_train deployment
@@ -244,7 +285,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             # compute desired pods for this deployment
             desired_pods = self.get_desired_pods(
-                predict_or_train, keys_per_pod,
+                deployment, predict_or_train, keys_per_pod,
                 min_pods, max_pods, current_pods)
 
             self.logger.debug('%s %s in namespace %s has a current state of %s'
@@ -268,6 +309,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 ])
                 self.logger.info('Successfully scaled %s from %s to %s pods.',
                                  deployment, current_pods, desired_pods)
+        # update number of tf-serving pods for next iteration of loop
+        self.tf_serving_pods = tf_serving_pods
 
     def scale(self):
         self.tally_keys()
