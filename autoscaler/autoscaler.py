@@ -306,8 +306,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 # TODO: Find a suitable method for scaling jobs
                 body = {'spec': {'parallelism': desired_pods}}
                 res = self.patch_namespaced_job(name, namespace, body)
-                self.logger.info('Successfully scaled %s from %s to %s pods.',
-                                 name, current_pods, desired_pods)
 
             elif resource_type == 'deployment':
                 body = {'spec': {'replicas': desired_pods}}
