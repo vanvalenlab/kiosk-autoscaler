@@ -248,16 +248,16 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         else:
             desired_pods = self.redis_keys[key] // keys_per_pod
 
-        # set `desired_pods` to inside the max/min boundaries.
-        if desired_pods > max_pods:
-            desired_pods = max_pods
-        elif desired_pods < min_pods:
-            desired_pods = min_pods
+            # set `desired_pods` to inside the max/min boundaries.
+            if desired_pods > max_pods:
+                desired_pods = max_pods
+            elif desired_pods < min_pods:
+                desired_pods = min_pods
 
-        # To avoid removing currently running pods, wait until all
-        # pods of the deployment are idle before scaling down.
-        if 0 < desired_pods < current_pods:
-            desired_pods = current_pods
+            # To avoid removing currently running pods, wait until all
+            # pods of the deployment are idle before scaling down.
+            if 0 < desired_pods < current_pods:
+                desired_pods = current_pods
 
         return desired_pods
 
