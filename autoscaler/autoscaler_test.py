@@ -191,14 +191,14 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         p = deployment_delim.join([param_delim.join(bad_params)])
         scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
                                        deployment_delim, param_delim)
-        scaler.scale_deployments()
+        scaler.scale_all_resources()
 
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
         p = deployment_delim.join([param_delim.join(bad_params)])
         scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
                                        deployment_delim, param_delim)
-        scaler.scale_deployments()
+        scaler.scale_all_resources()
 
         # test bad resource_type
         with pytest.raises(ValueError):
@@ -206,7 +206,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
             p = deployment_delim.join([param_delim.join(bad_params)])
             scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
                                            deployment_delim, param_delim)
-            scaler.scale_deployments()
+            scaler.scale_all_resources()
 
         # test good delimiters and scaling params, bad resource_type
         deploy_params = ['0', '5', '1', 'ns', 'deployment', 'predict', 'name']
@@ -221,10 +221,10 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
                          '1 total | 3 available | 0 unavailable\nmore\ntext\n'
         scaler._get_kubectl_output = lambda x: deploy_example
         scaler._make_kubectl_call = lambda x: True
-        scaler.scale_deployments()
+        scaler.scale_all_resources()
         # test desired_pods == current_pods
         scaler.get_desired_pods = lambda *x: 4
-        scaler.scale_deployments()
+        scaler.scale_all_resources()
 
         # same delimiter throws an error;
         with pytest.raises(ValueError):

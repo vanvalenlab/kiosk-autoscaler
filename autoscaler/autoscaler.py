@@ -60,7 +60,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
-        self.autoscaled_deployments = self._get_secondary_autoscaling_params(
+        self.secondary_autoscaling_params = self._get_secondary_autoscaling_params(
             secondary_scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
@@ -202,7 +202,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                              '`deployment` or `job`'.format(resource_type))
 
         resource_name_re = r'Replicas:\s+([0-9]+) desired \| [0-9]+ updated \| ' + \
-                        r'[0-9]+ total \| ([0-9]+) available \| [0-9]+ unavailable'
+            r'[0-9]+ total \| ([0-9]+) available \| [0-9]+ unavailable'
 
         description = self._get_kubectl_output([
             'kubectl', '-n', resource_namespace, 'describe',
@@ -236,29 +236,25 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def get_desired_pods(self, resource_name, key, keys_per_pod, min_pods,
                          max_pods, current_pods):
-        if resource_name in self.autoscaled_deployments:
-            extra_pods = self.new_tf_serving_pods * \
-                autoscaled_deployments[resource_name]
-            desired_pods = current_pods + extra_pods
-        else:
-            desired_pods = self.redis_keys[key] // keys_per_pod
+        desired_pods = self.redis_keys[key] // keys_per_pod
 
-            # set `desired_pods` to inside the max/min boundaries.
-            if desired_pods > max_pods:
-                desired_pods = max_pods
-            elif desired_pods < min_pods:
-                desired_pods = min_pods
+        # set `desired_pods` to inside the max/min boundaries.
+        if desired_pods > max_pods:
+            desired_pods = max_pods
+        elif desired_pods < min_pods:
+            desired_pods = min_pods
 
-            # To avoid removing currently running pods, wait until all
-            # pods of the deployment are idle before scaling down.
-            if 0 < desired_pods < current_pods:
-                desired_pods = current_pods
+        # To avoid removing currently running pods, wait until all
+        # pods of the deployment are idle before scaling down.
+        if 0 < desired_pods < current_pods:
+            desired_pods = current_pods
 
         return desired_pods
 
     def secondary_desired_pods(self, resource_name, reference_pods,
-            pods_per_reference_pod, min_pods, max_pods, current_pods):
-        desired_pods = current_pods + pods_per_reference_pod*reference_pods
+                               pods_per_reference_pod, min_pods, max_pods,
+                               current_pods):
+        desired_pods = current_pods + (pods_per_reference_pod * reference_pods)
 
         # trim `desired_pods` to lay inside the max/min boundaries.
         if desired_pods > max_pods:
@@ -273,14 +269,14 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return desired_pods
 
-    def scale_resource(desired_pods, current_pods, resource_type,
+    def scale_resource(self, desired_pods, current_pods, resource_type,
                        resource_namespace, resource_name):
         if desired_pods == current_pods:
-            continue  # no scaling action is required
+            return  # no scaling action is required
         if resource_type == 'job':
             # TODO: Find a suitable method for scaling jobs
             self.logger.debug('Job scaling has been temporarily disabled.')
-            continue
+            return
         elif resource_type == 'deployment':
             self._make_kubectl_call([
                 'kubectl', 'scale', '-n', resource_namespace,
@@ -322,7 +318,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             # scale pods
             self.scale_resource(desired_pods, current_pods, resource_type,
-                                resource_namespace, resource_name):
+                                resource_namespace, resource_name)
 
         for entry in self.secondary_autoscaling_params:
             try:
@@ -352,7 +348,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             new_reference_pods = current_reference_pods - \
                 self.previous_reference_pod_counts[resource_name]
             self.previous_reference_pod_counts[resource_name] = \
-                    new_reference_pods
+                new_reference_pods
 
             # compute desired pods for this deployment
             current_pods = self.get_current_pods(
@@ -365,7 +361,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             # scale pods
             self.scale_resource(desired_pods, current_pods, resource_type,
-                                resource_namespace, resource_name):
+                                resource_namespace, resource_name)
 
     def scale(self):
         self.tally_keys()
