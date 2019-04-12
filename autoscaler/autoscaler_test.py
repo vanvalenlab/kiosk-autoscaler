@@ -370,7 +370,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         # non-integer values will warn, but not raise (or autoscale)
         bad_params = ['name', 'bad_type', 'ns',
                       'primary', 'bad_type', 'ns',
-                      '7', '1', '10']
+                      'f7', 'f1', 'f10']
         p = deployment_delim.join([param_delim.join(bad_params)])
         scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
                                        deployment_delim, param_delim)
@@ -386,6 +386,18 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
         scaler.scale_secondary_resources()
+
+        # test bad resource_type
+        with pytest.raises(ValueError):
+            bad_params = ['name', 'bad_type', 'ns',
+                          'primary', 'bad_type', 'ns',
+                          '7', '1', '10']
+            p = deployment_delim.join([param_delim.join(bad_params)])
+            scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
+                                           deployment_delim, param_delim)
+            scaler.get_apps_v1_client = DummyKubernetes
+            scaler.get_batch_v1_client = DummyKubernetes
+            scaler.scale_secondary_resources()
 
         # test good delimiters and scaling params, bad resource_type
         deploy_params = ['0', '5', '1', 'ns', 'deployment', 'predict', 'name']
