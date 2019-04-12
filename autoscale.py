@@ -46,7 +46,9 @@ def initialize_logger(debug_mode=True):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter('[%(asctime)s]:[%(levelname)s]:[%(name)s]: %(message)s')
+    formatter = logging.Formatter(
+        '[%(asctime)s]:[%(levelname)s]:[%(name)s]: %(message)s')
+
     console = logging.StreamHandler(stream=sys.stdout)
     console.setFormatter(formatter)
 
