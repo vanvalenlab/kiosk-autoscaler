@@ -108,10 +108,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return autoscaled_deployments
 
-    def scan_iter(self, match=None):
+    def scan_iter(self, match=None, count=1000):
         while True:
             try:
-                response = self.redis_client.scan_iter(match=match)
+                response = self.redis_client.scan_iter(match=match, count=count)
                 break
             except redis.exceptions.ConnectionError as err:
                 self.logger.warning('Encountered %s: %s when calling SCAN. '
@@ -140,7 +140,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         for k in self.redis_keys:
             self.redis_keys[k] = 0
 
-        for key in self.scan_iter():
+        for key in self.scan_iter(count=1000):
             if any(re.match(k, key) for k in self.redis_keys):
                 status = self.hget(key, 'status')
 
