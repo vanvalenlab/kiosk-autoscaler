@@ -324,8 +324,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def scale_secondary_resources(self):
         for entry in self.secondary_autoscaling_params:
-            # redis-deployment|deployment|namespace|tf-serving-deployment|
-            # deployment|namespace2|podRatio|minPods|maxPods
+            # redis-consumer-deployment|deployment|deepcell|
+            # tf-serving-deployment|deployment|deepcell|7|0|200
             try:
                 resource_name = str(entry[0])
                 resource_type = str(entry[1])
