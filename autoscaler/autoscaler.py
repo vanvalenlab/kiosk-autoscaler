@@ -268,6 +268,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             'deepcell', 'deployment', 'tf-serving-deployment',
             only_running=True)
 
+        self.new_tf_serving_pods = tf_serving_pods - self.tf_serving_pods
+
         for entry in self.autoscaling_params:
             # entry schema: minPods maxPods keysPerPod namespace resource_type
             #               predict_or_train deployment
