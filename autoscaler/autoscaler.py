@@ -90,19 +90,19 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 for x in scaling_config.split(deployment_delim)]
 
     def _get_secondary_autoscaling_params(self, secondary_scaling_config,
-                                deployment_delim=';',
-                                param_delim='|'):
+                                          deployment_delim=';',
+                                          param_delim='|'):
         if deployment_delim == param_delim:
             raise ValueError('`deployment_delim` and `param_delim` must be '
                              'different. Got "{}" and "{}".'.format(
                                  deployment_delim, param_delim))
 
         secondary_autoscaling_params = [x.split(param_delim)
-                for x in secondary_scaling_config.split(deployment_delim)]
+                    for x in secondary_scaling_config.split(deployment_delim)]
         autoscaled_deployments = {}
         for secondary_autoscaling in secondary_autoscaling_params:
-            autoscaled_deployments[ secondary_autoscaling[0] ] = \
-                    secondary_autoscaling[1]
+            autoscaled_deployments[secondary_autoscaling[0]] = \
+                secondary_autoscaling[1]
         return autoscaled_deployments
 
     def _make_kubectl_call(self, args):
