@@ -43,14 +43,15 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
     Args:
         redis_client: Redis Client Connection object.
         scaling_config: string, joined lists of autoscaling configurations
+        secondary_scaling_config: string, defines initial pod counts
         backoff_seconds: int, after a redis/subprocess error, sleep for this
             many seconds and retry the command.
         deployment_delim: string, character delimiting deployment configs.
         param_delim: string, character delimiting deployment config parameters.
     """
 
-    def __init__(self, redis_client, scaling_config, backoff_seconds=1,
-                 deployment_delim=';', param_delim='|'):
+    def __init__(self, redis_client, scaling_config, secondary_scaling_config,
+                 backoff_seconds=1, deployment_delim=';', param_delim='|'):
         self.redis_client = redis_client
         self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
@@ -58,6 +59,11 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         self.autoscaling_params = self._get_autoscaling_params(
             scaling_config=scaling_config.rstrip(),
+            deployment_delim=deployment_delim,
+            param_delim=param_delim)
+
+        self.autoscaled_deployments = self._get_secondary_autoscaling_params(
+            secondary_scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
@@ -71,6 +77,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             'job': 'Completions'
         }
 
+        self.tf_serving_pods = 0
+        self.new_tf_serving_pods = 0
+
     def _get_autoscaling_params(self, scaling_config,
                                 deployment_delim=';',
                                 param_delim='|'):
@@ -81,6 +90,25 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
+
+    def _get_secondary_autoscaling_params(self, secondary_scaling_config,
+                                          deployment_delim=';',
+                                          param_delim='|'):
+        if deployment_delim == param_delim:
+            raise ValueError('`deployment_delim` and `param_delim` must be '
+                             'different. Got "{}" and "{}".'.format(
+                                 deployment_delim, param_delim))
+
+        secondary_autoscaling_params = [
+            x.split(param_delim) for x in
+            secondary_scaling_config.split(deployment_delim)
+        ]
+
+        autoscaled_deployments = {}
+        if len(secondary_autoscaling_params) > 1:
+            for s in secondary_autoscaling_params:
+                autoscaled_deployments[s[0]] = s[1]
+        return autoscaled_deployments
 
     def scan_iter(self, match=None):
         while True:
@@ -176,7 +204,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         """Wrapper for `kubernetes.client.patch_namespaced_job`"""
         try:
             kube_client = self.get_batch_v1_client()
-            response = kube_client.patch_namespaced_deployment(
+            response = kube_client.patch_namespaced_job(
                 name, namespace, body)
         except kubernetes.client.rest.ApiException as err:
             self.logger.error('%s when calling `patch_namespaced_job`: %s',
@@ -184,7 +212,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             raise err
         return response
 
-    def get_current_pods(self, namespace, resource_type, deployment):
+    def get_current_pods(self, namespace, resource_type, deployment,
+                         only_running=False):
         """Find the number of current pods deployed for the given resource"""
         if resource_type not in self.pod_keywords:
             raise ValueError('The resource_type of {} is unsuitable. Use either'
@@ -195,7 +224,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             deployments = self.list_namespaced_deployment(namespace)
             for d in deployments:
                 if d.metadata.name == deployment:
-                    current_pods = d.spec.replicas
+                    if only_running:
+                        current_pods = d.status.available_replicas
+                    else:
+                        current_pods = d.spec.replicas
                     break
 
         elif resource_type == 'job':
@@ -207,8 +239,13 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return int(current_pods)
 
-    def get_desired_pods(self, key, keys_per_pod, min_pods, max_pods, current_pods):
-        desired_pods = self.redis_keys[key] // keys_per_pod
+    def get_desired_pods(self, deployment, key, keys_per_pod,
+                         min_pods, max_pods, current_pods):
+        if deployment in self.autoscaled_deployments:
+            extra_pods = self.new_tf_serving_pods * self.autoscaled_deployments[deployment]
+            desired_pods = current_pods + extra_pods
+        else:
+            desired_pods = self.redis_keys[key] // keys_per_pod
 
         # set `desired_pods` to inside the max/min boundaries.
         if desired_pods > max_pods:
@@ -224,6 +261,12 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         return desired_pods
 
     def scale_deployments(self):
+        # some special logic surrounding the loop
+        # for tf-serving, the fixed-number deployment
+        tf_serving_pods = self.get_current_pods(
+            'deepcell', 'deployment', 'tf-serving-deployment',
+            only_running=True)
+
         for entry in self.autoscaling_params:
             # entry schema: minPods maxPods keysPerPod namespace resource_type
             #               predict_or_train deployment
@@ -245,7 +288,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 namespace, resource_type, name)
 
             desired_pods = self.get_desired_pods(
-                predict_or_train, keys_per_pod,
+                name, predict_or_train, keys_per_pod,
                 min_pods, max_pods, current_pods)
 
             self.logger.debug('%s `%s` in namespace `%s` has a current state '
@@ -270,6 +313,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             self.logger.info('Successfully scaled %s `%s` in namespace `%s` '
                              'from %s to %s pods.', resource_type, name,
                              namespace, current_pods, desired_pods)
+
+            # update number of tf-serving pods for next iteration of loop
+            self.tf_serving_pods = tf_serving_pods
 
     def scale(self):
         self.tally_keys()

@@ -32,10 +32,10 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-
-import logging
-import time
 import sys
+import time
+import logging
+import logging.handlers
 
 import redis
 
@@ -50,7 +50,10 @@ def initialize_logger(debug_mode=True):
     console = logging.StreamHandler(stream=sys.stdout)
     console.setFormatter(formatter)
 
-    fh = logging.FileHandler('autoscaler.log')
+    fh = logging.handlers.RotatingFileHandler(
+        filename='autoscaler.log',
+        maxBytes=10000000,
+        backupCount=10)
     fh.setFormatter(formatter)
 
     if debug_mode:
@@ -78,6 +81,7 @@ if __name__ == '__main__':
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
         scaling_config=os.getenv('AUTOSCALING'),
+        secondary_scaling_config=os.getenv('SECONDARY_AUTOSCALING'),
         backoff_seconds=os.getenv('REDIS_INTERVAL', '1'))
 
     INTERVAL = int(os.getenv('INTERVAL', '5'))
