@@ -104,7 +104,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def test_hget(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
                                        backoff_seconds=0.01)
         data = scaler.hget('rhash_new', 'status')
         assert data == 'new'
@@ -113,7 +113,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
     def test_scan_iter(self):
         prefix = 'predict'
         redis_client = DummyRedis(fail_tolerance=2, prefix=prefix)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
                                        backoff_seconds=0.01)
         data = scaler.scan_iter(match=prefix)
         keys = [k for k in data]
@@ -124,7 +124,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
     def test_get_desired_pods(self):
         # key, keys_per_pod, min_pods, max_pods, current_pods
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
                                        backoff_seconds=0.01)
         scaler.redis_keys['predict'] = 10
         # desired_pods is > max_pods
@@ -146,7 +146,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def test_get_current_pods(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
                                        backoff_seconds=0.01)
 
         # test invalid resource_type
@@ -171,7 +171,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def test_tally_keys(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None',
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
                                        backoff_seconds=0.01)
         scaler.tally_keys()
         assert scaler.redis_keys == {'predict': 2, 'train': 2}
@@ -189,14 +189,14 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         # non-integer values will warn, but not raise (or autoscale)
         bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
                                        deployment_delim, param_delim)
         scaler.scale_deployments()
 
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
                                        deployment_delim, param_delim)
         scaler.scale_deployments()
 
@@ -204,7 +204,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         with pytest.raises(ValueError):
             bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
             p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, 0,
+            scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
                                            deployment_delim, param_delim)
             scaler.scale_deployments()
 
@@ -214,7 +214,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
-        scaler = autoscaler.Autoscaler(redis_client, p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
                                        deployment_delim,
                                        param_delim)
         deploy_example = 'other\ntext\nReplicas:  4 desired | 2 updated | ' + \
