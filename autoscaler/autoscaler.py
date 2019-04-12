@@ -345,7 +345,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                               resource_type, resource_name)
 
             # keep track of how many reference pods we're working with
-            if not self.previous_reference_pods[resource_name]:
+            if resource_name not in self.previous_reference_pods:
                 self.previous_reference_pods[resource_name] = 0
 
             current_reference_pods = self.get_current_pods(
