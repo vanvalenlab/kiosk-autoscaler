@@ -67,8 +67,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
-        self.secondary_autoscaling_params = self._get_secondary_autoscaling_params(
-            secondary_scaling_config=secondary_scaling_config.rstrip(),
+        self.secondary_autoscaling_params = self._get_autoscaling_params(
+            scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
@@ -86,21 +86,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                                 param_delim='|'):
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
-
-    def _get_secondary_autoscaling_params(self, secondary_scaling_config,
-                                          deployment_delim=';',
-                                          param_delim='|'):
-        secondary_autoscaling_params = [
-            x.split(param_delim) for x in
-            secondary_scaling_config.split(deployment_delim)
-        ]
-
-        autoscaled_deployments = {}
-        for s in secondary_autoscaling_params:
-            if len(s) > 1:
-                autoscaled_deployments[s[0]] = s[1]
-
-        return autoscaled_deployments
 
     def scan_iter(self, match=None, count=1000):
         while True:
