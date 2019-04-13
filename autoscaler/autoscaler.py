@@ -290,10 +290,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 min_pods = int(entry[0])
                 max_pods = int(entry[1])
                 keys_per_pod = int(entry[2])
-                namespace = str(entry[3])
-                resource_type = str(entry[4])
-                predict_or_train = str(entry[5])
-                name = str(entry[6])
+                namespace = str(entry[3]).strip()
+                resource_type = str(entry[4]).strip()
+                predict_or_train = str(entry[5]).strip()
+                name = str(entry[6]).strip()
             except (IndexError, ValueError):
                 self.logger.error('Autoscaling entry %s is malformed.', entry)
                 continue
@@ -320,12 +320,12 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             # redis-consumer-deployment|deployment|deepcell|
             # tf-serving-deployment|deployment|deepcell|7|0|200
             try:
-                resource_name = str(entry[0])
-                resource_type = str(entry[1])
-                resource_namespace = str(entry[2])
-                reference_resource_name = str(entry[3])
-                reference_resource_type = str(entry[4])
-                reference_resource_namespace = str(entry[5])
+                resource_name = str(entry[0]).strip()
+                resource_type = str(entry[1]).strip()
+                resource_namespace = str(entry[2]).strip()
+                reference_resource_name = str(entry[3]).strip()
+                reference_resource_type = str(entry[4]).strip()
+                reference_resource_namespace = str(entry[5]).strip()
                 pods_per_other_pod = int(entry[6])
                 min_pods = int(entry[7])
                 max_pods = int(entry[8])
@@ -350,19 +350,21 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             new_reference_pods = current_reference_pods - \
                 self.previous_reference_pods[resource_name]
 
-            self.previous_reference_pods[resource_name] = new_reference_pods
+            # only scale secondary deployments if there are new reference pods
+            if new_reference_pods > 0:
+                # update reference pod count
+                self.previous_reference_pods[resource_name] = new_reference_pods
 
-            # compute desired pods for this deployment
-            current_pods = self.get_current_pods(
-                resource_namespace, resource_type, resource_name)
+                # compute desired pods for this deployment
+                current_pods = self.get_current_pods(
+                    resource_namespace, resource_type, resource_name)
 
-            desired_pods = self.get_secondary_desired_pods(
-                new_reference_pods, pods_per_other_pod,
-                min_pods, max_pods, current_pods)
+                desired_pods = self.get_secondary_desired_pods(
+                    new_reference_pods, pods_per_other_pod,
+                    min_pods, max_pods, current_pods)
 
-            # scale pods
-            self.scale_resource(desired_pods, current_pods, resource_type,
-                                resource_namespace, resource_name)
+                self.scale_resource(desired_pods, current_pods, resource_type,
+                                    resource_namespace, resource_name)
 
     def scale(self):
         self.tally_keys()
