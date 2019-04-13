@@ -46,7 +46,9 @@ def initialize_logger(debug_mode=True):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter('[%(asctime)s]:[%(levelname)s]:[%(name)s]: %(message)s')
+    formatter = logging.Formatter(
+        '[%(asctime)s]:[%(levelname)s]:[%(name)s]: %(message)s')
+
     console = logging.StreamHandler(stream=sys.stdout)
     console.setFormatter(formatter)
 
@@ -58,13 +60,13 @@ def initialize_logger(debug_mode=True):
 
     if debug_mode:
         console.setLevel(logging.DEBUG)
-        fh.setLevel(logging.DEBUG)
     else:
         console.setLevel(logging.INFO)
-        fh.setLevel(logging.INFO)
+    fh.setLevel(logging.DEBUG)
 
     logger.addHandler(console)
     logger.addHandler(fh)
+    logging.getLogger('kubernetes.client.rest').setLevel(logging.INFO)
 
 
 if __name__ == '__main__':

@@ -1,2 +1,2 @@
-redis
-numpy
+redis==3.2.1
+kubernetes==9.0.0
