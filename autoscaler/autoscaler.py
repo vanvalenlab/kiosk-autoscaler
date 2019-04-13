@@ -119,6 +119,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         for k in self.redis_keys:
             self.redis_keys[k] = 0
 
+        self.logger.debug('Tallying keys in redis matching: `%s`',
+                          ', '.join(self.redis_keys.keys()))
+
         for key in self.scan_iter(count=1000):
             if any(re.match(k, key) for k in self.redis_keys):
                 status = self.hget(key, 'status')
@@ -153,6 +156,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def list_namespaced_deployment(self, namespace):
         """Wrapper for `kubernetes.client.list_namespaced_deployment`"""
+        t = timeit.default_timer()
         try:
             kube_client = self.get_apps_v1_client()
             response = kube_client.list_namespaced_deployment(namespace)
@@ -160,10 +164,14 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             self.logger.error('%s when calling `list_namespaced_deployment`: %s',
                               type(err).__name__, err)
             raise err
+        self.logger.debug('Found %s deployments in namespace `%s` in '
+                          '%s seconds.', len(response.items), namespace,
+                          timeit.default_timer() - t)
         return response.items
 
     def list_namespaced_job(self, namespace):
         """Wrapper for `kubernetes.client.list_namespaced_job`"""
+        t = timeit.default_timer()
         try:
             kube_client = self.get_batch_v1_client()
             response = kube_client.list_namespaced_job(namespace)
@@ -171,10 +179,14 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             self.logger.error('%s when calling `list_namespaced_job`: %s',
                               type(err).__name__, err)
             raise err
+        self.logger.debug('Found %s deployments in namespace `%s` in '
+                          '%s seconds.', len(response.items), namespace,
+                          timeit.default_timer() - t)
         return response.items
 
     def patch_namespaced_deployment(self, name, namespace, body):
         """Wrapper for `kubernetes.client.patch_namespaced_deployment`"""
+        t = timeit.default_timer()
         try:
             kube_client = self.get_apps_v1_client()
             response = kube_client.patch_namespaced_deployment(
@@ -183,10 +195,14 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             self.logger.error('%s when calling `patch_namespaced_deployment`: '
                               '%s', type(err).__name__, err)
             raise err
+        self.logger.debug('Patched deployment `%s` in namespace `%s` with body'
+                          ' `%s` in %s seconds.', name, namespace, body,
+                          timeit.default_timer() - t)
         return response
 
     def patch_namespaced_job(self, name, namespace, body):
         """Wrapper for `kubernetes.client.patch_namespaced_job`"""
+        t = timeit.default_timer()
         try:
             kube_client = self.get_batch_v1_client()
             response = kube_client.patch_namespaced_job(
@@ -195,6 +211,9 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             self.logger.error('%s when calling `patch_namespaced_job`: %s',
                               type(err).__name__, err)
             raise err
+        self.logger.debug('Patched job `%s` in namespace `%s` with body `%s` '
+                          'in %s seconds.', name, namespace, body,
+                          timeit.default_timer() - t)
         return response
 
     def get_current_pods(self, namespace, resource_type, name,
