@@ -379,7 +379,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         scaler.scale_secondary_resources()
 
         # not enough params will warn, but not raise (or autoscale)
-        bad_params = ['0', '1', '3', 'ns', 'job', 'train']
+        bad_params = ['name', 'job', 'ns', 'primary', 'job', '7', '1', '10']
         p = deployment_delim.join([param_delim.join(bad_params)])
         scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
                                        deployment_delim, param_delim)
@@ -400,14 +400,11 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
             scaler.scale_secondary_resources()
 
         # test good delimiters and scaling params, bad resource_type
-        deploy_params = ['0', '5', '1', 'ns', 'deployment', 'predict', 'name']
-        job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
         scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
-                                       deployment_delim,
-                                       param_delim)
+                                       deployment_delim, param_delim)
 
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -416,6 +413,45 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         # test desired_pods == current_pods
         scaler.get_desired_pods = lambda *x: 4
         scaler.scale_secondary_resources()
+
+        # test nothing happens if no new pods
+        params = [deploy_params, job_params]
+        p = deployment_delim.join([param_delim.join(p) for p in params])
+
+        scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
+                                       deployment_delim, param_delim)
+
+        scaler.get_apps_v1_client = DummyKubernetes
+        scaler.get_batch_v1_client = DummyKubernetes
+
+        def curr_pods(*args, **kwargs):
+            if args[2] == 'primary':
+                return 0
+            return 2
+
+        scaler.get_current_pods = curr_pods
+
+        global counter
+        counter = 0
+
+        def dummy_scale(*args, **kwargs):
+            global counter
+            counter += 1
+
+        scaler.scale_resource = dummy_scale
+        scaler.scale_secondary_resources()
+        # `scale_deployments` should not be called.
+        assert counter == 0
+
+        # test scaling does occur with current reference pods
+        def curr_pods_2(*args, **kwargs):
+            if args[2] == 'primary':
+                return 1
+            return 2
+        scaler.get_current_pods = curr_pods_2
+        scaler.scale_secondary_resources()
+        # `scale_deployments` should be called.
+        assert counter == 1
 
         # same delimiter throws an error;
         with pytest.raises(ValueError):
