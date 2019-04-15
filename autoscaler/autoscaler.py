@@ -79,7 +79,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         self.managed_resource_types = {'deployment', 'job'}
 
-        self.previous_reference_pods = {}
+        self.reference_pods = {}
 
     def _get_autoscaling_params(self, scaling_config,
                                 deployment_delim=';',
@@ -348,8 +348,8 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                               resource_type, resource_name)
 
             # keep track of how many reference pods we're working with
-            if resource_name not in self.previous_reference_pods:
-                self.previous_reference_pods[resource_name] = 0
+            if resource_name not in self.reference_pods:
+                self.reference_pods[resource_name] = 0
 
             current_reference_pods = self.get_current_pods(
                 reference_resource_namespace,
@@ -358,7 +358,10 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
                 only_running=True)
 
             new_reference_pods = current_reference_pods - \
-                self.previous_reference_pods[resource_name]
+                self.reference_pods[resource_name]
+
+            # update reference pod count
+            self.reference_pods[resource_name] = current_reference_pods
 
             self.logger.debug('Secondary scaling: %s `%s` references %s `%s` '
                               'which has %s pods (%s new pods).',
@@ -368,8 +371,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
             # only scale secondary deployments if there are new reference pods
             if new_reference_pods > 0:
-                # update reference pod count
-                self.previous_reference_pods[resource_name] = new_reference_pods
 
                 # compute desired pods for this deployment
                 current_pods = self.get_current_pods(
