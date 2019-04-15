@@ -369,7 +369,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
             # only scale secondary deployments if there are new reference pods
             if new_reference_pods > 0:
                 # update reference pod count
-                self.previous_reference_pods[resource_name] = new_reference_pods
+                self.previous_reference_pods[resource_name] = current_reference_pods
 
                 # compute desired pods for this deployment
                 current_pods = self.get_current_pods(
