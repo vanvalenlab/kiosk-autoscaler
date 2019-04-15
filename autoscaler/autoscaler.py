@@ -246,10 +246,7 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return int(current_pods)
 
-    def get_desired_pods(self, key, keys_per_pod,
-                         min_pods, max_pods, current_pods):
-        desired_pods = self.redis_keys[key] // keys_per_pod
-
+    def clip_pod_count(self, desired_pods, min_pods, max_pods, current_pods):
         # set `desired_pods` to inside the max/min boundaries.
         if desired_pods > max_pods:
             desired_pods = max_pods
@@ -263,23 +260,17 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
         return desired_pods
 
+    def get_desired_pods(self, key, keys_per_pod,
+                         min_pods, max_pods, current_pods):
+        desired_pods = self.redis_keys[key] // keys_per_pod
+        return self.clip_pod_count(desired_pods, min_pods,
+                                   max_pods, current_pods)
+
     def get_secondary_desired_pods(self, reference_pods, pods_per_reference_pod,
                                    min_pods, max_pods, current_pods):
-        desired_pods = current_pods + (pods_per_reference_pod * reference_pods)
-
-        # trim `desired_pods` to lay inside the max/min boundaries.
-        if desired_pods > max_pods:
-            desired_pods = max_pods
-        elif desired_pods < min_pods:
-            desired_pods = min_pods
-
-        # To avoid removing currently running pods, wait until all
-        # pods of the deployment are idle before scaling down.
-        # TODO: is this necessary?
-        if 0 < desired_pods < current_pods:
-            desired_pods = current_pods
-
-        return desired_pods
+        desired_pods = current_pods + pods_per_reference_pod * reference_pods
+        return self.clip_pod_count(desired_pods, min_pods,
+                                   max_pods, current_pods)
 
     def scale_resource(self, desired_pods, current_pods,
                        resource_type, namespace, name):
