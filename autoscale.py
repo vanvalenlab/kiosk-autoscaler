@@ -75,13 +75,12 @@ if __name__ == '__main__':
     REDIS_CLIENT = autoscaler.redis.RedisClient(
         host=os.getenv('REDIS_HOST'),
         port=os.getenv('REDIS_PORT'),
-        backoff=1)
+        backoff=os.getenv('REDIS_INTERVAL', '1'))
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
         scaling_config=os.getenv('AUTOSCALING'),
-        secondary_scaling_config=os.getenv('SECONDARY_AUTOSCALING'),
-        backoff_seconds=os.getenv('REDIS_INTERVAL', '1'))
+        secondary_scaling_config=os.getenv('SECONDARY_AUTOSCALING'))
 
     INTERVAL = int(os.getenv('INTERVAL', '5'))
 
