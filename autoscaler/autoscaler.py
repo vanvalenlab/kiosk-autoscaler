@@ -110,20 +110,14 @@ class Autoscaler(object):
 
     def get_apps_v1_client(self):
         """Returns Kubernetes API Client for AppsV1Api"""
-        t = timeit.default_timer()
         kubernetes.config.load_incluster_config()
         kube_client = kubernetes.client.AppsV1Api()
-        self.logger.debug('Created AppsV1Api client in %s seconds.',
-                          timeit.default_timer() - t)
         return kube_client
 
     def get_batch_v1_client(self):
         """Returns Kubernetes API Client for AppsV1Api"""
-        t = timeit.default_timer()
         kubernetes.config.load_incluster_config()
         kube_client = kubernetes.client.BatchV1Api()
-        self.logger.debug('Created BatchV1Api client in %s seconds.',
-                          timeit.default_timer() - t)
         return kube_client
 
     def list_namespaced_deployment(self, namespace):
