@@ -93,7 +93,7 @@ class Autoscaler(object):
 
         for key in self.redis_client.scan_iter(count=1000):
             if any(re.match(k, key) for k in self.redis_keys):
-                if not self.redis_client.type(key) != 'hash':
+                if self.redis_client.type(key) != 'hash':
                     continue
 
                 status = self.redis_client.hget(key, 'status')
