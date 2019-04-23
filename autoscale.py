@@ -37,8 +37,6 @@ import time
 import logging
 import logging.handlers
 
-import redis
-
 import autoscaler
 
 
@@ -74,11 +72,10 @@ if __name__ == '__main__':
 
     _logger = logging.getLogger(__file__)
 
-    REDIS_CLIENT = redis.StrictRedis(
+    REDIS_CLIENT = autoscaler.redis.RedisClient(
         host=os.getenv('REDIS_HOST'),
         port=os.getenv('REDIS_PORT'),
-        decode_responses=True,
-        charset='utf-8')
+        backoff=1)
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
