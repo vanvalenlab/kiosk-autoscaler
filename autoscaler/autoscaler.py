@@ -35,7 +35,7 @@ import logging
 import kubernetes
 
 
-class Autoscaler(object):  # pylint: disable=useless-object-inheritance
+class Autoscaler(object):
     """Read Redis and scale up k8s pods if required.
 
     Args:
