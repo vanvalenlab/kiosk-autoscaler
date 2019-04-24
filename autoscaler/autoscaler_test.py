@@ -29,7 +29,6 @@ from __future__ import division
 from __future__ import print_function
 
 import pytest
-import redis
 import kubernetes
 
 import autoscaler
@@ -94,7 +93,7 @@ class DummyRedis(object):
         return False
 
     def type(self, rhash):
-        return 'hash' if 'bad' in rhash else 'list'
+        return 'hash'
 
 
 class DummyKubernetes(object):
@@ -102,7 +101,7 @@ class DummyKubernetes(object):
     def __init__(self, fail=False):
         self.fail = fail
 
-    def list_namespaced_deployment(self, *args, **kwargs):
+    def list_namespaced_deployment(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[
@@ -114,7 +113,7 @@ class DummyKubernetes(object):
                   status=Bunch(available_replicas='8')),
         ])
 
-    def list_namespaced_job(self, *args, **kwargs):
+    def list_namespaced_job(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[
@@ -124,13 +123,13 @@ class DummyKubernetes(object):
                   metadata=Bunch(name='pod2'))
         ])
 
-    def patch_namespaced_deployment(self, *args, **kwargs):
+    def patch_namespaced_deployment(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(spec=Bunch(replicas='4'),
                                   metadata=Bunch(name='pod'))])
 
-    def patch_namespaced_job(self, *args, **kwargs):
+    def patch_namespaced_job(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(spec=Bunch(completions='0', parallelism='0'),
