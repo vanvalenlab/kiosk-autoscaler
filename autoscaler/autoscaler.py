@@ -29,36 +29,31 @@ from __future__ import division
 from __future__ import print_function
 
 import re
-import time
 import timeit
 import logging
 
-import redis
 import kubernetes
 
 
-class Autoscaler(object):  # pylint: disable=useless-object-inheritance
+class Autoscaler(object):
     """Read Redis and scale up k8s pods if required.
 
     Args:
         redis_client: Redis Client Connection object.
         scaling_config: string, joined lists of autoscaling configurations
         secondary_scaling_config: string, defines initial pod counts
-        backoff_seconds: int, after a redis/subprocess error, sleep for this
-            many seconds and retry the command.
         deployment_delim: string, character delimiting deployment configs.
         param_delim: string, character delimiting deployment config parameters.
     """
 
     def __init__(self, redis_client, scaling_config, secondary_scaling_config,
-                 backoff_seconds=1, deployment_delim=';', param_delim='|'):
+                 deployment_delim=';', param_delim='|'):
 
         if deployment_delim == param_delim:
             raise ValueError('`deployment_delim` and `param_delim` must be '
                              'different. Got "{}" and "{}".'.format(
                                  deployment_delim, param_delim))
         self.redis_client = redis_client
-        self.backoff_seconds = int(backoff_seconds)
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
 
@@ -87,32 +82,6 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
 
-    def scan_iter(self, match=None, count=1000):
-        while True:
-            try:
-                response = self.redis_client.scan_iter(match=match, count=count)
-                break
-            except redis.exceptions.ConnectionError as err:
-                self.logger.warning('Encountered %s: %s when calling SCAN. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err,
-                                    self.backoff_seconds)
-                time.sleep(self.backoff_seconds)
-        return response
-
-    def hget(self, rhash, key):
-        while True:
-            try:
-                response = self.redis_client.hget(rhash, key)
-                break
-            except redis.exceptions.ConnectionError as err:
-                self.logger.warning('Encountered %s: %s when calling HGET. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err,
-                                    self.backoff_seconds)
-                time.sleep(self.backoff_seconds)
-        return response
-
     def tally_keys(self):
         start = timeit.default_timer()
         # reset the key tallies to 0
@@ -122,9 +91,12 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         self.logger.debug('Tallying keys in redis matching: `%s`',
                           ', '.join(self.redis_keys.keys()))
 
-        for key in self.scan_iter(count=1000):
+        for key in self.redis_client.scan_iter(count=1000):
             if any(re.match(k, key) for k in self.redis_keys):
-                status = self.hget(key, 'status')
+                if self.redis_client.type(key) != 'hash':
+                    continue
+
+                status = self.redis_client.hget(key, 'status')
 
                 # add up each type of key that is "in-progress" or "new"
                 if status is not None and status not in self.completed_statuses:
@@ -138,20 +110,14 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def get_apps_v1_client(self):
         """Returns Kubernetes API Client for AppsV1Api"""
-        t = timeit.default_timer()
         kubernetes.config.load_incluster_config()
         kube_client = kubernetes.client.AppsV1Api()
-        self.logger.debug('Created AppsV1Api client in %s seconds.',
-                          timeit.default_timer() - t)
         return kube_client
 
     def get_batch_v1_client(self):
         """Returns Kubernetes API Client for AppsV1Api"""
-        t = timeit.default_timer()
         kubernetes.config.load_incluster_config()
         kube_client = kubernetes.client.BatchV1Api()
-        self.logger.debug('Created BatchV1Api client in %s seconds.',
-                          timeit.default_timer() - t)
         return kube_client
 
     def list_namespaced_deployment(self, namespace):

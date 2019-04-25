@@ -29,7 +29,6 @@ from __future__ import division
 from __future__ import print_function
 
 import pytest
-import redis
 import kubernetes
 
 import autoscaler
@@ -40,18 +39,14 @@ class Bunch(object):
         self.__dict__.update(kwds)
 
 
-class DummyRedis(object):  # pylint: disable=useless-object-inheritance
+class DummyRedis(object):
 
-    def __init__(self, prefix='predict', status='new', fail_tolerance=0):
+    def __init__(self, prefix='predict', status='new'):
         self.prefix = '/'.join(x for x in prefix.split('/') if x)
         self.status = status
         self.fail_count = 0
-        self.fail_tolerance = fail_tolerance
 
     def keys(self):
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
         return [
             '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
             '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
@@ -62,10 +57,6 @@ class DummyRedis(object):  # pylint: disable=useless-object-inheritance
         ]
 
     def scan_iter(self, match=None, count=None):
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
-
         keys = [
             '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
             '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
@@ -91,9 +82,6 @@ class DummyRedis(object):  # pylint: disable=useless-object-inheritance
                         yield k
 
     def hget(self, rhash, field):
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
         if field == 'status':
             return rhash.split('_')[1]
         elif field == 'file_name':
@@ -104,13 +92,16 @@ class DummyRedis(object):  # pylint: disable=useless-object-inheritance
             return rhash.split('_')[-1]
         return False
 
+    def type(self, rhash):
+        return 'hash'
+
 
 class DummyKubernetes(object):
 
     def __init__(self, fail=False):
         self.fail = fail
 
-    def list_namespaced_deployment(self, *args, **kwargs):
+    def list_namespaced_deployment(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[
@@ -122,7 +113,7 @@ class DummyKubernetes(object):
                   status=Bunch(available_replicas='8')),
         ])
 
-    def list_namespaced_job(self, *args, **kwargs):
+    def list_namespaced_job(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[
@@ -132,45 +123,25 @@ class DummyKubernetes(object):
                   metadata=Bunch(name='pod2'))
         ])
 
-    def patch_namespaced_deployment(self, *args, **kwargs):
+    def patch_namespaced_deployment(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(spec=Bunch(replicas='4'),
                                   metadata=Bunch(name='pod'))])
 
-    def patch_namespaced_job(self, *args, **kwargs):
+    def patch_namespaced_job(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(spec=Bunch(completions='0', parallelism='0'),
                                   metadata=Bunch(name='pod'))])
 
 
-class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
-
-    def test_hget(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
-        data = scaler.hget('rhash_new', 'status')
-        assert data == 'new'
-        assert scaler.redis_client.fail_count == redis_client.fail_tolerance
-
-    def test_scan_iter(self):
-        prefix = 'predict'
-        redis_client = DummyRedis(fail_tolerance=2, prefix=prefix)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
-        data = scaler.scan_iter(match=prefix)
-        keys = [k for k in data]
-        expected = [k for k in redis_client.keys() if k.startswith(prefix)]
-        assert scaler.redis_client.fail_count == redis_client.fail_tolerance
-        assert keys == expected
+class TestAutoscaler(object):
 
     def test_get_desired_pods(self):
         # key, keys_per_pod, min_pods, max_pods, current_pods
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
         scaler.redis_keys['predict'] = 10
         # desired_pods is > max_pods
         desired_pods = scaler.get_desired_pods('predict', 2, 0, 2, 1)
@@ -188,9 +159,8 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
     def test_get_secondary_desired_pods(self):
         # reference_pods, pods_per_reference_pod,
         # min_pods, max_pods, current_pods
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
 
         # desired_pods is > max_pods
         desired_pods = scaler.get_secondary_desired_pods(1, 10, 0, 4, 4)
@@ -212,27 +182,24 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         assert desired_pods == 10
 
     def test_list_namespaced_deployment(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
         # test ApiException is logged and thrown
         scaler.get_apps_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
             scaler.list_namespaced_deployment('ns')
 
     def test_list_namespaced_job(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
         # test ApiException is logged and thrown
         scaler.get_batch_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
             scaler.list_namespaced_job('ns')
 
     def test_patch_namespaced_deployment(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
         # test ApiException is logged and thrown
         scaler.get_apps_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
@@ -240,9 +207,8 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
                 'pod', 'ns', {'spec': {'replicas': 1}})
 
     def test_patch_namespaced_job(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
         # test ApiException is logged and thrown
         scaler.get_batch_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
@@ -250,9 +216,8 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
                 'job', 'ns', {'spec': {'parallelism': 1}})
 
     def test_get_current_pods(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
 
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -280,14 +245,13 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         assert deployed_pods == 2
 
     def test_tally_keys(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
         scaler.tally_keys()
         assert scaler.redis_keys == {'predict': 2, 'train': 2}
 
     def test_scale_primary_resources(self):
-        redis_client = DummyRedis(fail_tolerance=2)
+        redis_client = DummyRedis()
         deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
         job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
 
@@ -299,7 +263,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         # non-integer values will warn, but not raise (or autoscale)
         bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
+        scaler = autoscaler.Autoscaler(redis_client, p, 'None',
                                        deployment_delim, param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -308,7 +272,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
+        scaler = autoscaler.Autoscaler(redis_client, p, 'None',
                                        deployment_delim, param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -318,7 +282,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         with pytest.raises(ValueError):
             bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
             p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
+            scaler = autoscaler.Autoscaler(redis_client, p, 'None',
                                            deployment_delim, param_delim)
             scaler.get_apps_v1_client = DummyKubernetes
             scaler.get_batch_v1_client = DummyKubernetes
@@ -330,9 +294,8 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
-        scaler = autoscaler.Autoscaler(redis_client, p, 'None', 0,
-                                       deployment_delim,
-                                       param_delim)
+        scaler = autoscaler.Autoscaler(redis_client, p, 'None',
+                                       deployment_delim, param_delim)
 
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -347,14 +310,14 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
             param_delim = '|'
             deployment_delim = '|'
             p = deployment_delim.join([param_delim.join(p) for p in params])
-            autoscaler.Autoscaler(None, p, 'None', 0,
+            autoscaler.Autoscaler(None, p, 'None',
                                   deployment_delim, param_delim)
 
     def test_scale_secondary_resources(self):
         # redis-deployment|deployment|namespace|tf-serving-deployment|
         # deployment|namespace2|podRatio|minPods|maxPods
 
-        redis_client = DummyRedis(fail_tolerance=2)
+        redis_client = DummyRedis()
         deploy_params = ['name', 'deployment', 'ns',
                          'primary', 'deployment', 'ns',
                          '7', '1', '10']
@@ -372,7 +335,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
                       'primary', 'bad_type', 'ns',
                       'f7', 'f1', 'f10']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
                                        deployment_delim, param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -381,7 +344,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['name', 'job', 'ns', 'primary', 'job', '7', '1', '10']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
                                        deployment_delim, param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -393,7 +356,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
                           'primary', 'bad_type', 'ns',
                           '7', '1', '10']
             p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
+            scaler = autoscaler.Autoscaler(redis_client, 'None', p,
                                            deployment_delim, param_delim)
             scaler.get_apps_v1_client = DummyKubernetes
             scaler.get_batch_v1_client = DummyKubernetes
@@ -403,7 +366,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
                                        deployment_delim, param_delim)
 
         scaler.get_apps_v1_client = DummyKubernetes
@@ -418,7 +381,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p, 0,
+        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
                                        deployment_delim, param_delim)
 
         scaler.get_apps_v1_client = DummyKubernetes
@@ -458,13 +421,12 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
             param_delim = '|'
             deployment_delim = '|'
             p = deployment_delim.join([param_delim.join(p) for p in params])
-            autoscaler.Autoscaler(None, 'None', p, 0,
+            autoscaler.Autoscaler(None, 'None', p,
                                   deployment_delim, param_delim)
 
     def test_scale(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
-                                       backoff_seconds=0.01)
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
 
         global counter
         counter = 0
