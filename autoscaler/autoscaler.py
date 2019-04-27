@@ -62,28 +62,62 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
 
-        self.autoscaling_params = self._get_autoscaling_params(
+        self.autoscaling_params = self._get_primary_autoscaling_params(
             scaling_config=scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
-        self.secondary_autoscaling_params = self._get_autoscaling_params(
+        self.secondary_autoscaling_params = self._get_secondary_autoscaling_params(
             scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
         self.redis_keys = {
             'predict': 0,
-            'train': 0
+            'train': 0,
+            'track': 0
         }
 
         self.managed_resource_types = {'deployment', 'job'}
 
         self.reference_pods = {}
 
-    def _get_autoscaling_params(self, scaling_config,
-                                deployment_delim=';',
-                                param_delim='|'):
+    def _get_primary_autoscaling_params(self, scaling_config,
+                                        deployment_delim=';',
+                                        param_delim='|'):
+        raw_params = [x.split(param_delim)
+                      for x in scaling_config.split(deployment_delim)]
+
+        params = {}
+        for entry in raw_params:
+            try:
+                print(len(entry))
+                print(entry)
+                namespace_resource_type_name = (
+                    str(entry[3]).strip(),
+                    str(entry[4]).strip(),
+                    str(entry[6]).strip(),
+                )
+
+                if namespace_resource_type_name not in params:
+                    params[namespace_resource_type_name] = []
+
+                params[namespace_resource_type_name].append({
+                    'min_pods': int(entry[0]),
+                    'max_pods': int(entry[1]),
+                    'keys_per_pod': int(entry[2]),
+                    'prefix': str(entry[5]).strip(),
+                })
+
+            except (IndexError, ValueError):
+                self.logger.error('Autoscaling entry %s is malformed.', entry)
+                continue
+
+        return params
+
+    def _get_secondary_autoscaling_params(self, scaling_config,
+                                          deployment_delim=';',
+                                          param_delim='|'):
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
 
@@ -293,29 +327,27 @@ class Autoscaler(object):  # pylint: disable=useless-object-inheritance
 
     def scale_primary_resources(self):
         """Scale each resource defined in `autoscaling_params`"""
-        for entry in self.autoscaling_params:
-            # entry schema: minPods maxPods keysPerPod namespace resource_type
-            #               predict_or_train deployment
-            try:
-                min_pods = int(entry[0])
-                max_pods = int(entry[1])
-                keys_per_pod = int(entry[2])
-                namespace = str(entry[3]).strip()
-                resource_type = str(entry[4]).strip()
-                predict_or_train = str(entry[5]).strip()
-                name = str(entry[6]).strip()
-            except (IndexError, ValueError):
-                self.logger.error('Autoscaling entry %s is malformed.', entry)
-                continue
+        for ((namespace, resource_type, name),
+             entries) in self.autoscaling_params.items():
+            # iterate through all entries with this
+            # (namespace, resource_type, name) entry. We sum up the current
+            # and desired pods over all entries
+            current_pods = 0
+            desired_pods = 0
+            for entry in entries:
+                min_pods = entry["min_pods"]
+                max_pods = entry["max_pods"]
+                keys_per_pod = entry["keys_per_pod"]
+                prefix = entry["prefix"]
+
+                current_pods += self.get_current_pods(
+                    namespace, resource_type, name)
+
+                desired_pods += self.get_desired_pods(
+                    prefix, keys_per_pod,
+                    min_pods, max_pods, current_pods)
 
             self.logger.debug('Scaling %s `%s`', resource_type, name)
-
-            current_pods = self.get_current_pods(
-                namespace, resource_type, name)
-
-            desired_pods = self.get_desired_pods(
-                predict_or_train, keys_per_pod,
-                min_pods, max_pods, current_pods)
 
             self.logger.debug('%s `%s` in namespace `%s` has a current state '
                               'of %s pods and a desired state of %s pods.',

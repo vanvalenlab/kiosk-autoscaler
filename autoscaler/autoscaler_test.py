@@ -284,7 +284,7 @@ class TestAutoscaler(object):  # pylint: disable=useless-object-inheritance
         scaler = autoscaler.Autoscaler(redis_client, 'None', 'None',
                                        backoff_seconds=0.01)
         scaler.tally_keys()
-        assert scaler.redis_keys == {'predict': 2, 'train': 2}
+        assert scaler.redis_keys == {'predict': 2, 'track': 0, 'train': 2}
 
     def test_scale_primary_resources(self):
         redis_client = DummyRedis(fail_tolerance=2)
