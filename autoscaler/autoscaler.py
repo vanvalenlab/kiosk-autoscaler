@@ -167,6 +167,8 @@ class Autoscaler(object):
         self.logger.debug('Found %s deployments in namespace `%s` in '
                           '%s seconds.', len(response.items), namespace,
                           timeit.default_timer() - t)
+        self.logger.debug('Specifically: %s',
+                          [d.metadata.name for d in response.items])
         return response.items
 
     def list_namespaced_job(self, namespace):
@@ -179,7 +181,7 @@ class Autoscaler(object):
             self.logger.error('%s when calling `list_namespaced_job`: %s',
                               type(err).__name__, err)
             raise err
-        self.logger.debug('Found %s deployments in namespace `%s` in '
+        self.logger.debug('Found %s jobs in namespace `%s` in '
                           '%s seconds.', len(response.items), namespace,
                           timeit.default_timer() - t)
         return response.items
@@ -232,6 +234,9 @@ class Autoscaler(object):
                         current_pods = d.status.available_replicas
                     else:
                         current_pods = d.spec.replicas
+
+                    self.logger.debug("Deployment {} has {} pods".format(
+                        name, current_pods))
                     break
 
         elif resource_type == 'job':
