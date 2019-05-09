@@ -140,7 +140,7 @@ class Autoscaler(object):
 
         self.logger.debug('Finished tallying redis keys in %s seconds.',
                           timeit.default_timer() - start)
-        self.logger.info('Tallied redis keys: %s', self.redis_keys)
+        self.logger.info('In-progress or new redis keys: %s', self.redis_keys)
 
     def get_apps_v1_client(self):
         """Returns Kubernetes API Client for AppsV1Api"""
@@ -298,25 +298,48 @@ class Autoscaler(object):
 
     def scale_primary_resources(self):
         """Scale each resource defined in `autoscaling_params`"""
+        self.logger.debug("Scaling primary resources.")
         for ((namespace, resource_type, name),
              entries) in self.autoscaling_params.items():
             # iterate through all entries with this
             # (namespace, resource_type, name) entry. We sum up the current
             # and desired pods over all entries
-            current_pods = 0
+
+            current_pods = self.get_current_pods(namespace, resource_type, name)
             desired_pods = 0
+
+            self.logger.debug("Scaling {}".format((namespace, resource_type, name)))
+
+            min_pods_for_all_entries = []
+            max_pods_for_all_entries = []
+
             for entry in entries:
                 min_pods = entry["min_pods"]
                 max_pods = entry["max_pods"]
                 keys_per_pod = entry["keys_per_pod"]
                 prefix = entry["prefix"]
 
-                current_pods += self.get_current_pods(
-                    namespace, resource_type, name)
+                min_pods_for_all_entries.append(min_pods)
+                max_pods_for_all_entries.append(max_pods)
 
-                desired_pods += self.get_desired_pods(
-                    prefix, keys_per_pod,
-                    min_pods, max_pods, current_pods)
+                self.logger.debug("Inspecting entry {}.".format(entry))
+
+                desired_pods += self.get_desired_pods(prefix, keys_per_pod,
+                                                      min_pods, max_pods,
+                                                      current_pods)
+
+                self.logger.debug("desired_pods now = {}".format(desired_pods))
+
+            # this is the most conservative bound
+            if entries == []:
+                return
+
+            min_pods = max(min_pods_for_all_entries)
+            max_pods = min(max_pods_for_all_entries)
+
+            desired_pods = self.clip_pod_count(desired_pods, min_pods,
+                                               max_pods, current_pods)
+            self.logger.debug("desired_pods clamped to {}".format(desired_pods))
 
             self.logger.debug('Scaling %s `%s`', resource_type, name)
 
