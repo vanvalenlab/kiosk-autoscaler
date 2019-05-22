@@ -138,6 +138,51 @@ class DummyKubernetes(object):
 
 class TestAutoscaler(object):
 
+    def test__get_primary_autoscaling_params(self):
+        primary_params = """
+            1|2|3|namespace|resource_1|predict|name_1;
+            4|5|6|namespace|resource_1|track|name_1;
+            7|8|9|namespace|resource_2|train|name_1
+            """.strip()
+        secondary_params = """
+            redis-consumer-deployment|deployment|deepcell|tf-serving-deployment|deployment|deepcell|7|0|0;
+            tracking-consumer-deployment|deployment|deepcell|tf-serving-deployment|deployment|deepcell|7|0|0;
+            data-processing-deployment|deployment|deepcell|tf-serving-deployment|deployment|deepcell|1|0|0
+            """.strip()
+
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client,
+                                       primary_params,
+                                       secondary_params)
+        print("printing primary the nsecondary")
+        print(scaler.autoscaling_params)
+        print(scaler.secondary_autoscaling_params)
+        print("done printing")
+        assert scaler.autoscaling_params == {
+            ('namespace', 'resource_1', 'name_1'): [
+                {
+                    "prefix": "predict",
+                    "min_pods": 1,
+                    "max_pods": 2,
+                    "keys_per_pod": 3
+                },
+                {
+                    "prefix": "track",
+                    "min_pods": 4,
+                    "max_pods": 5,
+                    "keys_per_pod": 6
+                },
+            ],
+            ('namespace', 'resource_2', 'name_1'): [
+                {
+                    "prefix": "train",
+                    "min_pods": 7,
+                    "max_pods": 8,
+                    "keys_per_pod": 9
+                }
+            ]
+        }
+
     def test_get_desired_pods(self):
         # key, keys_per_pod, min_pods, max_pods, current_pods
         redis_client = DummyRedis()
@@ -248,7 +293,7 @@ class TestAutoscaler(object):
         redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
         scaler.tally_keys()
-        assert scaler.redis_keys == {'predict': 2, 'train': 2}
+        assert scaler.redis_keys == {'predict': 2, 'track': 0, 'train': 2}
 
     def test_scale_primary_resources(self):
         redis_client = DummyRedis()
