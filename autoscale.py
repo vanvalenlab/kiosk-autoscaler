@@ -24,7 +24,7 @@
 # limitations under the License.
 # ============================================================================
 """
-Sort the key in the Redis base according to name and scale different
+Sort the keys in the Redis base according to name and scale different
 Kubernetes deployments as appropriate.
 """
 from __future__ import absolute_import
@@ -79,8 +79,7 @@ if __name__ == '__main__':
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
-        scaling_config=os.getenv('AUTOSCALING'),
-        secondary_scaling_config=os.getenv('SECONDARY_AUTOSCALING'))
+        scaling_config=os.getenv('AUTOSCALING'))
 
     INTERVAL = int(os.getenv('INTERVAL', '5'))
 
