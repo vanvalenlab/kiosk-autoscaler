@@ -220,7 +220,17 @@ class Autoscaler(object):
 
     def get_current_pods(self, namespace, resource_type, name,
                          only_running=False):
-        """Find the number of current pods deployed for the given resource"""
+        """Find the number of current pods deployed for the given resource.
+
+        Args:
+            name: str, name of the resource.
+            namespace: str, namespace of the resource.
+            resource_type: str, type of resource to count.
+            only_running: bool, Only count pods with status `Running`.
+
+        Returns:
+            int, number of pods for the given resource.
+        """
         if resource_type not in self.managed_resource_types:
             raise ValueError('The resource_type of {} is unsuitable. Use either'
                              '`deployment` or `job`'.format(resource_type))
