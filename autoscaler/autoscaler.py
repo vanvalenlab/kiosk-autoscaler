@@ -28,7 +28,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import re
 import timeit
 import logging
 
@@ -116,27 +115,20 @@ class Autoscaler(object):
         return [x.split(param_delim)
                 for x in scaling_config.split(deployment_delim)]
 
-    def tally_keys(self):
+    def tally_queues(self):
+        """Update counts of all redis queues"""
         start = timeit.default_timer()
-        # reset the key tallies to 0
-        for k in self.redis_keys:
-            self.redis_keys[k] = 0
 
-        self.logger.debug('Tallying keys in redis matching: `%s`',
-                          ', '.join(self.redis_keys.keys()))
+        for q in self.redis_keys:
+            self.logger.debug('Tallying items in queue `%s`.', q)
 
-        for key in self.redis_client.scan_iter(count=1000):
-            if any(re.match(k, key) for k in self.redis_keys):
-                if self.redis_client.type(key) != 'hash':
-                    continue
+            num_items = self.redis_client.llen(q)
 
-                status = self.redis_client.hget(key, 'status')
+            processing_q = 'processing-{}:*'.format(q)
+            scan = self.redis_client.scan_iter(match=processing_q, count=1000)
+            num_in_progress = len([x for x in scan])
 
-                # add up each type of key that is "in-progress" or "new"
-                if status is not None and status not in self.completed_statuses:
-                    for k in self.redis_keys:
-                        if re.match(k, key):
-                            self.redis_keys[k] += 1
+            self.redis_keys[q] = num_items + num_in_progress
 
         self.logger.debug('Finished tallying redis keys in %s seconds.',
                           timeit.default_timer() - start)
@@ -420,6 +412,6 @@ class Autoscaler(object):
                                     resource_namespace, resource_name)
 
     def scale(self):
-        self.tally_keys()
+        self.tally_queues()
         self.scale_primary_resources()
         self.scale_secondary_resources()
