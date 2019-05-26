@@ -52,17 +52,13 @@ class Autoscaler(object):
             raise ValueError('`deployment_delim` and `param_delim` must be '
                              'different. Got "{}" and "{}".'.format(
                                  deployment_delim, param_delim))
+
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
 
         self.autoscaling_params = self._get_primary_autoscaling_params(
             scaling_config=scaling_config.rstrip(),
-            deployment_delim=deployment_delim,
-            param_delim=param_delim)
-
-        self.secondary_autoscaling_params = self._get_secondary_autoscaling_params(
-            scaling_config=secondary_scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
 
@@ -106,12 +102,6 @@ class Autoscaler(object):
                 continue
 
         return params
-
-    def _get_secondary_autoscaling_params(self, scaling_config,
-                                          deployment_delim=';',
-                                          param_delim='|'):
-        return [x.split(param_delim)
-                for x in scaling_config.split(deployment_delim)]
 
     def tally_queues(self):
         """Update counts of all redis queues"""
@@ -272,12 +262,6 @@ class Autoscaler(object):
         return self.clip_pod_count(desired_pods, min_pods,
                                    max_pods, current_pods)
 
-    def get_secondary_desired_pods(self, reference_pods, pods_per_reference_pod,
-                                   min_pods, max_pods, current_pods):
-        desired_pods = current_pods + pods_per_reference_pod * reference_pods
-        return self.clip_pod_count(desired_pods, min_pods,
-                                   max_pods, current_pods)
-
     def scale_resource(self, desired_pods, current_pods,
                        resource_type, namespace, name):
         if desired_pods == current_pods:
@@ -352,65 +336,6 @@ class Autoscaler(object):
             self.scale_resource(desired_pods, current_pods,
                                 resource_type, namespace, name)
 
-    def scale_secondary_resources(self):
-        for entry in self.secondary_autoscaling_params:
-            # redis-consumer-deployment|deployment|deepcell|
-            # tf-serving-deployment|deployment|deepcell|7|0|200
-            try:
-                resource_name = str(entry[0]).strip()
-                resource_type = str(entry[1]).strip()
-                resource_namespace = str(entry[2]).strip()
-                reference_resource_name = str(entry[3]).strip()
-                reference_resource_type = str(entry[4]).strip()
-                reference_resource_namespace = str(entry[5]).strip()
-                pods_per_other_pod = int(entry[6])
-                min_pods = int(entry[7])
-                max_pods = int(entry[8])
-            except (IndexError, ValueError):
-                self.logger.error('Secondary autoscaling entry %s is '
-                                  'malformed.', entry)
-                continue
-
-            self.logger.debug('Scaling secondary %s `%s`',
-                              resource_type, resource_name)
-
-            # keep track of how many reference pods we're working with
-            if resource_name not in self.reference_pods:
-                self.reference_pods[resource_name] = 0
-
-            current_reference_pods = self.get_current_pods(
-                reference_resource_namespace,
-                reference_resource_type,
-                reference_resource_name,
-                only_running=True)
-
-            new_reference_pods = current_reference_pods - \
-                self.reference_pods[resource_name]
-
-            # update reference pod count
-            self.reference_pods[resource_name] = current_reference_pods
-
-            self.logger.debug('Secondary scaling: %s `%s` references %s `%s` '
-                              'which has %s pods (%s new pods).',
-                              str(resource_type).capitalize(), resource_name,
-                              reference_resource_type, reference_resource_name,
-                              current_reference_pods, new_reference_pods)
-
-            # only scale secondary deployments if there are new reference pods
-            if new_reference_pods > 0:
-
-                # compute desired pods for this deployment
-                current_pods = self.get_current_pods(
-                    resource_namespace, resource_type, resource_name)
-
-                desired_pods = self.get_secondary_desired_pods(
-                    new_reference_pods, pods_per_other_pod,
-                    min_pods, max_pods, current_pods)
-
-                self.scale_resource(desired_pods, current_pods, resource_type,
-                                    resource_namespace, resource_name)
-
     def scale(self):
         self.tally_queues()
         self.scale_primary_resources()
-        self.scale_secondary_resources()
