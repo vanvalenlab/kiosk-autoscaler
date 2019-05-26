@@ -85,8 +85,6 @@ class Autoscaler(object):
         params = {}
         for entry in raw_params:
             try:
-                print(len(entry))
-                print(entry)
                 namespace_resource_type_name = (
                     str(entry[3]).strip(),
                     str(entry[4]).strip(),
@@ -224,8 +222,9 @@ class Autoscaler(object):
             int, number of pods for the given resource.
         """
         if resource_type not in self.managed_resource_types:
-            raise ValueError('The resource_type of {} is unsuitable. Use either'
-                             '`deployment` or `job`'.format(resource_type))
+            raise ValueError(
+                '`resource_type` must be one of {}. Got {}.'.format(
+                    self.managed_resource_types, resource_type))
 
         current_pods = 0
         if resource_type == 'deployment':
@@ -237,8 +236,8 @@ class Autoscaler(object):
                     else:
                         current_pods = d.spec.replicas
 
-                    self.logger.debug("Deployment {} has {} pods".format(
-                        name, current_pods))
+                    self.logger.debug('Deployment %s has %s pods',
+                                      name, current_pods)
                     break
 
         elif resource_type == 'job':
@@ -300,7 +299,7 @@ class Autoscaler(object):
 
     def scale_primary_resources(self):
         """Scale each resource defined in `autoscaling_params`"""
-        self.logger.debug("Scaling primary resources.")
+        self.logger.debug('Scaling primary resources.')
         for ((namespace, resource_type, name),
              entries) in self.autoscaling_params.items():
             # iterate through all entries with this
@@ -310,27 +309,27 @@ class Autoscaler(object):
             current_pods = self.get_current_pods(namespace, resource_type, name)
             desired_pods = 0
 
-            self.logger.debug("Scaling {}".format((namespace, resource_type, name)))
+            self.logger.debug('Scaling %s', (namespace, resource_type, name))
 
             min_pods_for_all_entries = []
             max_pods_for_all_entries = []
 
             for entry in entries:
-                min_pods = entry["min_pods"]
-                max_pods = entry["max_pods"]
-                keys_per_pod = entry["keys_per_pod"]
-                prefix = entry["prefix"]
+                min_pods = entry['min_pods']
+                max_pods = entry['max_pods']
+                keys_per_pod = entry['keys_per_pod']
+                prefix = entry['prefix']
 
                 min_pods_for_all_entries.append(min_pods)
                 max_pods_for_all_entries.append(max_pods)
 
-                self.logger.debug("Inspecting entry {}.".format(entry))
+                self.logger.debug('Inspecting entry %s.', entry)
 
                 desired_pods += self.get_desired_pods(prefix, keys_per_pod,
                                                       min_pods, max_pods,
                                                       current_pods)
 
-                self.logger.debug("desired_pods now = {}".format(desired_pods))
+                self.logger.debug('desired_pods now = %s', desired_pods)
 
             # this is the most conservative bound
             if entries == []:
@@ -341,7 +340,7 @@ class Autoscaler(object):
 
             desired_pods = self.clip_pod_count(desired_pods, min_pods,
                                                max_pods, current_pods)
-            self.logger.debug("desired_pods clamped to {}".format(desired_pods))
+            self.logger.debug('desired_pods clipped to %s', desired_pods)
 
             self.logger.debug('Scaling %s `%s`', resource_type, name)
 
