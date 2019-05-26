@@ -326,6 +326,9 @@ class Autoscaler(object):
                                                max_pods, current_pods)
             self.logger.debug('desired_pods clipped to %s', desired_pods)
 
+            if desired_pods > 0 and resource_type != 'job':
+                desired_pods = current_pods if current_pods > 0 else 1
+
             self.logger.debug('Scaling %s `%s`', resource_type, name)
 
             self.logger.debug('%s `%s` in namespace `%s` has a current state '
