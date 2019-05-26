@@ -244,6 +244,7 @@ class Autoscaler(object):
 
     def clip_pod_count(self, desired_pods, min_pods, max_pods, current_pods):
         # set `desired_pods` to inside the max/min boundaries.
+        _original = desired_pods
         if desired_pods > max_pods:
             desired_pods = max_pods
         elif desired_pods < min_pods:
@@ -254,6 +255,9 @@ class Autoscaler(object):
         if 0 < desired_pods < current_pods:
             desired_pods = current_pods
 
+        if desired_pods != _original:
+            self.logger.debug('Clipped pods from %s to %s',
+                              _original, desired_pods)
         return desired_pods
 
     def get_desired_pods(self, key, keys_per_pod,
@@ -324,7 +328,6 @@ class Autoscaler(object):
 
             desired_pods = self.clip_pod_count(desired_pods, min_pods,
                                                max_pods, current_pods)
-            self.logger.debug('desired_pods clipped to %s', desired_pods)
 
             if desired_pods > 0 and resource_type != 'job':
                 desired_pods = current_pods if current_pods > 0 else 1
