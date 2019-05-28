@@ -28,6 +28,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import random
+import string
+
 import pytest
 import kubernetes
 
@@ -41,59 +44,12 @@ class Bunch(object):
 
 class DummyRedis(object):
 
-    def __init__(self, prefix='predict', status='new'):
-        self.prefix = '/'.join(x for x in prefix.split('/') if x)
-        self.status = status
-        self.fail_count = 0
-
-    def keys(self):
-        return [
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
-            '{}_{}_{}'.format('train', self.status, 'x.TIFF'),
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'done', 'x.tiff'),
-            '{}_{}_{}'.format('train', self.status, 'x.zip'),
-        ]
+    def llen(self, queue_name):
+        return len(queue_name)
 
     def scan_iter(self, match=None, count=None):
-        keys = [
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
-            '{}_{}_{}'.format('train', self.status, 'x.TIFF'),
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'done', 'x.tiff'),
-            '{}_{}_{}'.format('train', self.status, 'x.zip'),
-            'malformedKey'
-        ]
-        if match:
-            return (k for k in keys if k.startswith(match[:-1]))
-        return (k for k in keys)
-
-    def expected_keys(self, suffix=None):
-        for k in self.keys():
-            v = k.split('_')
-            if v[0] == self.prefix:
-                if v[1] == self.status:
-                    if suffix:
-                        if v[-1].lower().endswith(suffix):
-                            yield k
-                    else:
-                        yield k
-
-    def hget(self, rhash, field):
-        if field == 'status':
-            return rhash.split('_')[1]
-        elif field == 'file_name':
-            return rhash.split('_')[-1]
-        elif field == 'input_file_name':
-            return rhash.split('_')[-1]
-        elif field == 'output_file_name':
-            return rhash.split('_')[-1]
-        return False
-
-    def type(self, rhash):
-        return 'hash'
+        match = match if match else ''
+        yield match + random.choice(string.ascii_letters)
 
 
 class DummyKubernetes(object):
@@ -138,25 +94,18 @@ class DummyKubernetes(object):
 
 class TestAutoscaler(object):
 
-    def test__get_primary_autoscaling_params(self):
+    def test__get_autoscaling_params(self):
         primary_params = """
             1|2|3|namespace|resource_1|predict|name_1;
             4|5|6|namespace|resource_1|track|name_1;
             7|8|9|namespace|resource_2|train|name_1
             """.strip()
-        secondary_params = """
-            redis-consumer-deployment|deployment|deepcell|tf-serving-deployment|deployment|deepcell|7|0|0;
-            tracking-consumer-deployment|deployment|deepcell|tf-serving-deployment|deployment|deepcell|7|0|0;
-            data-processing-deployment|deployment|deepcell|tf-serving-deployment|deployment|deepcell|1|0|0
-            """.strip()
 
         redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client,
-                                       primary_params,
-                                       secondary_params)
-        print("printing primary the nsecondary")
+                                       primary_params)
+        print("printing primary autoscaling parameters")
         print(scaler.autoscaling_params)
-        print(scaler.secondary_autoscaling_params)
         print("done printing")
         assert scaler.autoscaling_params == {
             ('namespace', 'resource_1', 'name_1'): [
@@ -200,31 +149,6 @@ class TestAutoscaler(object):
         # desired_pods is in range, current_pods exist
         desired_pods = scaler.get_desired_pods('predict', 10, 0, 5, 3)
         assert desired_pods == 3
-
-    def test_get_secondary_desired_pods(self):
-        # reference_pods, pods_per_reference_pod,
-        # min_pods, max_pods, current_pods
-        redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
-
-        # desired_pods is > max_pods
-        desired_pods = scaler.get_secondary_desired_pods(1, 10, 0, 4, 4)
-        assert desired_pods == 4
-        # desired_pods is < min_pods
-        desired_pods = scaler.get_secondary_desired_pods(1, 1, 2, 4, 0)
-        assert desired_pods == 2
-        # desired_pods is in range
-        desired_pods = scaler.get_secondary_desired_pods(1, 3, 0, 4, 0)
-        assert desired_pods == 3
-        # desired_pods is in range with current pods and max limit
-        desired_pods = scaler.get_secondary_desired_pods(1, 3, 0, 4, 2)
-        assert desired_pods == 4
-        # desired_pods is in range with current pods and no max limit
-        desired_pods = scaler.get_secondary_desired_pods(1, 3, 0, 10, 2)
-        assert desired_pods == 5
-        # desired_pods is less than current_pods but current > max
-        desired_pods = scaler.get_secondary_desired_pods(1, 0, 0, 4, 10)
-        assert desired_pods == 10
 
     def test_list_namespaced_deployment(self):
         redis_client = DummyRedis()
@@ -289,13 +213,13 @@ class TestAutoscaler(object):
         deployed_pods = scaler.get_current_pods('ns', 'job', 'pod2')
         assert deployed_pods == 2
 
-    def test_tally_keys(self):
+    def test_tally_queues(self):
         redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
-        scaler.tally_keys()
-        assert scaler.redis_keys == {'predict': 2, 'track': 0, 'train': 2}
+        scaler.tally_queues()
+        assert scaler.redis_keys == {'predict': 8, 'track': 6, 'train': 6}
 
-    def test_scale_primary_resources(self):
+    def test_scale_resources(self):
         redis_client = DummyRedis()
         deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
         job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
@@ -308,30 +232,30 @@ class TestAutoscaler(object):
         # non-integer values will warn, but not raise (or autoscale)
         bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 'None',
-                                       deployment_delim, param_delim)
+        scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
+                                       param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
 
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, 'None',
-                                       deployment_delim, param_delim)
+        scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
+                                       param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
 
         # test bad resource_type
         with pytest.raises(ValueError):
             bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
             p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, 'None',
-                                           deployment_delim, param_delim)
+            scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
+                                           param_delim)
             scaler.get_apps_v1_client = DummyKubernetes
             scaler.get_batch_v1_client = DummyKubernetes
-            scaler.scale_primary_resources()
+            scaler.scale_resources()
 
         # test good delimiters and scaling params, bad resource_type
         deploy_params = ['0', '5', '1', 'ns', 'deployment', 'predict', 'name']
@@ -339,135 +263,23 @@ class TestAutoscaler(object):
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
-        scaler = autoscaler.Autoscaler(redis_client, p, 'None',
-                                       deployment_delim, param_delim)
+        scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
+                                       param_delim)
 
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
 
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
         # test desired_pods == current_pods
         scaler.get_desired_pods = lambda *x: 4
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
 
         # same delimiter throws an error;
         with pytest.raises(ValueError):
             param_delim = '|'
             deployment_delim = '|'
             p = deployment_delim.join([param_delim.join(p) for p in params])
-            autoscaler.Autoscaler(None, p, 'None',
-                                  deployment_delim, param_delim)
-
-    def test_scale_secondary_resources(self):
-        # redis-deployment|deployment|namespace|tf-serving-deployment|
-        # deployment|namespace2|podRatio|minPods|maxPods
-
-        redis_client = DummyRedis()
-        deploy_params = ['name', 'deployment', 'ns',
-                         'primary', 'deployment', 'ns',
-                         '7', '1', '10']
-        job_params = ['name', 'job', 'ns',
-                      'primary', 'job', 'ns',
-                      '7', '1', '10']
-
-        params = [deploy_params, job_params]
-
-        param_delim = '|'
-        deployment_delim = ';'
-
-        # non-integer values will warn, but not raise (or autoscale)
-        bad_params = ['name', 'bad_type', 'ns',
-                      'primary', 'bad_type', 'ns',
-                      'f7', 'f1', 'f10']
-        p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
-                                       deployment_delim, param_delim)
-        scaler.get_apps_v1_client = DummyKubernetes
-        scaler.get_batch_v1_client = DummyKubernetes
-        scaler.scale_secondary_resources()
-
-        # not enough params will warn, but not raise (or autoscale)
-        bad_params = ['name', 'job', 'ns', 'primary', 'job', '7', '1', '10']
-        p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
-                                       deployment_delim, param_delim)
-        scaler.get_apps_v1_client = DummyKubernetes
-        scaler.get_batch_v1_client = DummyKubernetes
-        scaler.scale_secondary_resources()
-
-        # test bad resource_type
-        with pytest.raises(ValueError):
-            bad_params = ['name', 'bad_type', 'ns',
-                          'primary', 'bad_type', 'ns',
-                          '7', '1', '10']
-            p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, 'None', p,
-                                           deployment_delim, param_delim)
-            scaler.get_apps_v1_client = DummyKubernetes
-            scaler.get_batch_v1_client = DummyKubernetes
-            scaler.scale_secondary_resources()
-
-        # test good delimiters and scaling params, bad resource_type
-        params = [deploy_params, job_params]
-        p = deployment_delim.join([param_delim.join(p) for p in params])
-
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
-                                       deployment_delim, param_delim)
-
-        scaler.get_apps_v1_client = DummyKubernetes
-        scaler.get_batch_v1_client = DummyKubernetes
-
-        scaler.scale_secondary_resources()
-        # test desired_pods == current_pods
-        scaler.get_desired_pods = lambda *x: 4
-        scaler.scale_secondary_resources()
-
-        # test nothing happens if no new pods
-        params = [deploy_params, job_params]
-        p = deployment_delim.join([param_delim.join(p) for p in params])
-
-        scaler = autoscaler.Autoscaler(redis_client, 'None', p,
-                                       deployment_delim, param_delim)
-
-        scaler.get_apps_v1_client = DummyKubernetes
-        scaler.get_batch_v1_client = DummyKubernetes
-
-        def curr_pods(*args, **kwargs):
-            if args[2] == 'primary':
-                return 0
-            return 2
-
-        scaler.get_current_pods = curr_pods
-
-        global counter
-        counter = 0
-
-        def dummy_scale(*args, **kwargs):
-            global counter
-            counter += 1
-
-        scaler.scale_resource = dummy_scale
-        scaler.scale_secondary_resources()
-        # `scale_deployments` should not be called.
-        assert counter == 0
-
-        # test scaling does occur with current reference pods
-        def curr_pods_2(*args, **kwargs):
-            if args[2] == 'primary':
-                return 1
-            return 2
-        scaler.get_current_pods = curr_pods_2
-        scaler.scale_secondary_resources()
-        # `scale_deployments` should be called.
-        assert counter == 1
-
-        # same delimiter throws an error;
-        with pytest.raises(ValueError):
-            param_delim = '|'
-            deployment_delim = '|'
-            p = deployment_delim.join([param_delim.join(p) for p in params])
-            autoscaler.Autoscaler(None, 'None', p,
-                                  deployment_delim, param_delim)
+            autoscaler.Autoscaler(None, p, deployment_delim, param_delim)
 
     def test_scale(self):
         redis_client = DummyRedis()
@@ -484,9 +296,8 @@ class TestAutoscaler(object):
             global counter
             counter += 1
 
-        scaler.tally_keys = dummy_tally
-        scaler.scale_primary_resources = dummy_scale_resources
-        scaler.scale_secondary_resources = dummy_scale_resources
+        scaler.tally_queues = dummy_tally
+        scaler.scale_resources = dummy_scale_resources
 
         scaler.scale()
-        assert counter == 3
+        assert counter == 2

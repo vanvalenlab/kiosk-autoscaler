@@ -23,10 +23,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
-"""
-Sort the key in the Redis base according to name and scale different
-Kubernetes deployments as appropriate.
-"""
+"""Turn on and off k8s resources based on items in the Redis queue."""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -79,15 +76,13 @@ if __name__ == '__main__':
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
-        scaling_config=os.getenv('AUTOSCALING'),
-        secondary_scaling_config=os.getenv('SECONDARY_AUTOSCALING'))
+        scaling_config=os.getenv('AUTOSCALING'))
 
     INTERVAL = int(os.getenv('INTERVAL', '5'))
 
     while True:
         try:
             SCALER.scale()
-            _logger.debug('Sleeping for %s seconds.', INTERVAL)
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
