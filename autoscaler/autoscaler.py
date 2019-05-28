@@ -44,7 +44,10 @@ class Autoscaler(object):
         param_delim: string, character delimiting deployment config parameters.
     """
 
-    def __init__(self, redis_client, scaling_config, deployment_delim=';',
+    def __init__(self,
+                 redis_client,
+                 scaling_config,
+                 deployment_delim=';',
                  param_delim='|'):
 
         if deployment_delim == param_delim:
@@ -56,7 +59,7 @@ class Autoscaler(object):
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
 
-        self.autoscaling_params = self._get_primary_autoscaling_params(
+        self.autoscaling_params = self._get_autoscaling_params(
             scaling_config=scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
@@ -71,9 +74,10 @@ class Autoscaler(object):
 
         self.reference_pods = {}
 
-    def _get_primary_autoscaling_params(self, scaling_config,
-                                        deployment_delim=';',
-                                        param_delim='|'):
+    def _get_autoscaling_params(self,
+                                scaling_config,
+                                deployment_delim=';',
+                                param_delim='|'):
         raw_params = [x.split(param_delim)
                       for x in scaling_config.split(deployment_delim)]
 
@@ -284,22 +288,28 @@ class Autoscaler(object):
                          namespace, current_pods, desired_pods)
         return True
 
-    def scale_primary_resources(self):
+    def scale_resources(self):
         """Scale each resource defined in `autoscaling_params`"""
         self.logger.debug('Scaling primary resources.')
-        for ((namespace, resource_type, name),
-             entries) in self.autoscaling_params.items():
-            # iterate through all entries with this
-            # (namespace, resource_type, name) entry. We sum up the current
-            # and desired pods over all entries
+        for fingerprint, entries in self.autoscaling_params.items():
+            # iterate through all entries with this fingerprint
+            namespace, resource_type, name = fingerprint
 
+            self.logger.debug('Scaling %s `%s.%s` with %s config entries.',
+                              resource_type, namespace, name, len(entries))
+
+            # Sum up the current and desired pods over all entries
             current_pods = self.get_current_pods(namespace, resource_type, name)
             desired_pods = 0
 
-            self.logger.debug('Scaling %s', (namespace, resource_type, name))
-
             min_pods_for_all_entries = []
             max_pods_for_all_entries = []
+
+            if entries == []:  # this is the most conservative bound
+                self.logger.warning('%s `%s.%s` has no autoscaling entry.',
+                                    str(resource_type).capitalize(),
+                                    namespace, name)
+                continue
 
             for entry in entries:
                 min_pods = entry['min_pods']
@@ -310,17 +320,9 @@ class Autoscaler(object):
                 min_pods_for_all_entries.append(min_pods)
                 max_pods_for_all_entries.append(max_pods)
 
-                self.logger.debug('Inspecting entry %s.', entry)
-
                 desired_pods += self.get_desired_pods(prefix, keys_per_pod,
                                                       min_pods, max_pods,
                                                       current_pods)
-
-                self.logger.debug('desired_pods now = %s', desired_pods)
-
-            # this is the most conservative bound
-            if entries == []:
-                return
 
             min_pods = max(min_pods_for_all_entries)
             max_pods = min(max_pods_for_all_entries)
@@ -330,8 +332,6 @@ class Autoscaler(object):
 
             if desired_pods > 0 and resource_type != 'job':
                 desired_pods = current_pods if current_pods > 0 else 1
-
-            self.logger.debug('Scaling %s `%s`', resource_type, name)
 
             self.logger.debug('%s `%s` in namespace `%s` has a current state '
                               'of %s pods and a desired state of %s pods.',
@@ -343,4 +343,4 @@ class Autoscaler(object):
 
     def scale(self):
         self.tally_queues()
-        self.scale_primary_resources()
+        self.scale_resources()

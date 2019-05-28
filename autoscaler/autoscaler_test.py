@@ -94,7 +94,7 @@ class DummyKubernetes(object):
 
 class TestAutoscaler(object):
 
-    def test__get_primary_autoscaling_params(self):
+    def test__get_autoscaling_params(self):
         primary_params = """
             1|2|3|namespace|resource_1|predict|name_1;
             4|5|6|namespace|resource_1|track|name_1;
@@ -219,7 +219,7 @@ class TestAutoscaler(object):
         scaler.tally_queues()
         assert scaler.redis_keys == {'predict': 8, 'track': 6, 'train': 6}
 
-    def test_scale_primary_resources(self):
+    def test_scale_resources(self):
         redis_client = DummyRedis()
         deploy_params = ['0', '1', '3', 'ns', 'deployment', 'predict', 'name']
         job_params = ['1', '2', '1', 'ns', 'job', 'train', 'name']
@@ -236,7 +236,7 @@ class TestAutoscaler(object):
                                        param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
 
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
@@ -245,7 +245,7 @@ class TestAutoscaler(object):
                                        param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
 
         # test bad resource_type
         with pytest.raises(ValueError):
@@ -255,7 +255,7 @@ class TestAutoscaler(object):
                                            param_delim)
             scaler.get_apps_v1_client = DummyKubernetes
             scaler.get_batch_v1_client = DummyKubernetes
-            scaler.scale_primary_resources()
+            scaler.scale_resources()
 
         # test good delimiters and scaling params, bad resource_type
         deploy_params = ['0', '5', '1', 'ns', 'deployment', 'predict', 'name']
@@ -269,10 +269,10 @@ class TestAutoscaler(object):
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
 
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
         # test desired_pods == current_pods
         scaler.get_desired_pods = lambda *x: 4
-        scaler.scale_primary_resources()
+        scaler.scale_resources()
 
         # same delimiter throws an error;
         with pytest.raises(ValueError):
@@ -297,7 +297,7 @@ class TestAutoscaler(object):
             counter += 1
 
         scaler.tally_queues = dummy_tally
-        scaler.scale_primary_resources = dummy_scale_resources
+        scaler.scale_resources = dummy_scale_resources
 
         scaler.scale()
         assert counter == 2
