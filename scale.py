@@ -72,7 +72,7 @@ if __name__ == '__main__':
     REDIS_CLIENT = autoscaler.redis.RedisClient(
         host=os.getenv('REDIS_HOST'),
         port=os.getenv('REDIS_PORT'),
-        backoff=os.getenv('REDIS_INTERVAL', '1'))
+        backoff=int(os.getenv('REDIS_INTERVAL', '1')))
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
