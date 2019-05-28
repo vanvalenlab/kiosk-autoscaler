@@ -28,7 +28,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import re
 import timeit
 import logging
 
@@ -52,6 +51,7 @@ class Autoscaler(object):
             raise ValueError('`deployment_delim` and `param_delim` must be '
                              'different. Got "{}" and "{}".'.format(
                                  deployment_delim, param_delim))
+
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
@@ -80,8 +80,6 @@ class Autoscaler(object):
         params = {}
         for entry in raw_params:
             try:
-                print(len(entry))
-                print(entry)
                 namespace_resource_type_name = (
                     str(entry[3]).strip(),
                     str(entry[4]).strip(),
@@ -104,27 +102,20 @@ class Autoscaler(object):
 
         return params
 
-    def tally_keys(self):
+    def tally_queues(self):
+        """Update counts of all redis queues"""
         start = timeit.default_timer()
-        # reset the key tallies to 0
-        for k in self.redis_keys:
-            self.redis_keys[k] = 0
 
-        self.logger.debug('Tallying keys in redis matching: `%s`',
-                          ', '.join(self.redis_keys.keys()))
+        for q in self.redis_keys:
+            self.logger.debug('Tallying items in queue `%s`.', q)
 
-        for key in self.redis_client.scan_iter(count=1000):
-            if any(re.match(k, key) for k in self.redis_keys):
-                if self.redis_client.type(key) != 'hash':
-                    continue
+            num_items = self.redis_client.llen(q)
 
-                status = self.redis_client.hget(key, 'status')
+            processing_q = 'processing-{}:*'.format(q)
+            scan = self.redis_client.scan_iter(match=processing_q, count=1000)
+            num_in_progress = len([x for x in scan])
 
-                # add up each type of key that is "in-progress" or "new"
-                if status is not None and status not in self.completed_statuses:
-                    for k in self.redis_keys:
-                        if re.match(k, key):
-                            self.redis_keys[k] += 1
+            self.redis_keys[q] = num_items + num_in_progress
 
         self.logger.debug('Finished tallying redis keys in %s seconds.',
                           timeit.default_timer() - start)
@@ -208,10 +199,21 @@ class Autoscaler(object):
 
     def get_current_pods(self, namespace, resource_type, name,
                          only_running=False):
-        """Find the number of current pods deployed for the given resource"""
+        """Find the number of current pods deployed for the given resource.
+
+        Args:
+            name: str, name of the resource.
+            namespace: str, namespace of the resource.
+            resource_type: str, type of resource to count.
+            only_running: bool, Only count pods with status `Running`.
+
+        Returns:
+            int, number of pods for the given resource.
+        """
         if resource_type not in self.managed_resource_types:
-            raise ValueError('The resource_type of {} is unsuitable. Use either'
-                             '`deployment` or `job`'.format(resource_type))
+            raise ValueError(
+                '`resource_type` must be one of {}. Got {}.'.format(
+                    self.managed_resource_types, resource_type))
 
         current_pods = 0
         if resource_type == 'deployment':
@@ -223,8 +225,8 @@ class Autoscaler(object):
                     else:
                         current_pods = d.spec.replicas
 
-                    self.logger.debug("Deployment {} has {} pods".format(
-                        name, current_pods))
+                    self.logger.debug('Deployment %s has %s pods',
+                                      name, current_pods)
                     break
 
         elif resource_type == 'job':
@@ -241,6 +243,7 @@ class Autoscaler(object):
 
     def clip_pod_count(self, desired_pods, min_pods, max_pods, current_pods):
         # set `desired_pods` to inside the max/min boundaries.
+        _original = desired_pods
         if desired_pods > max_pods:
             desired_pods = max_pods
         elif desired_pods < min_pods:
@@ -251,6 +254,9 @@ class Autoscaler(object):
         if 0 < desired_pods < current_pods:
             desired_pods = current_pods
 
+        if desired_pods != _original:
+            self.logger.debug('Clipped pods from %s to %s',
+                              _original, desired_pods)
         return desired_pods
 
     def get_desired_pods(self, key, keys_per_pod,
@@ -280,7 +286,7 @@ class Autoscaler(object):
 
     def scale_primary_resources(self):
         """Scale each resource defined in `autoscaling_params`"""
-        self.logger.debug("Scaling primary resources.")
+        self.logger.debug('Scaling primary resources.')
         for ((namespace, resource_type, name),
              entries) in self.autoscaling_params.items():
             # iterate through all entries with this
@@ -290,27 +296,27 @@ class Autoscaler(object):
             current_pods = self.get_current_pods(namespace, resource_type, name)
             desired_pods = 0
 
-            self.logger.debug("Scaling {}".format((namespace, resource_type, name)))
+            self.logger.debug('Scaling %s', (namespace, resource_type, name))
 
             min_pods_for_all_entries = []
             max_pods_for_all_entries = []
 
             for entry in entries:
-                min_pods = entry["min_pods"]
-                max_pods = entry["max_pods"]
-                keys_per_pod = entry["keys_per_pod"]
-                prefix = entry["prefix"]
+                min_pods = entry['min_pods']
+                max_pods = entry['max_pods']
+                keys_per_pod = entry['keys_per_pod']
+                prefix = entry['prefix']
 
                 min_pods_for_all_entries.append(min_pods)
                 max_pods_for_all_entries.append(max_pods)
 
-                self.logger.debug("Inspecting entry {}.".format(entry))
+                self.logger.debug('Inspecting entry %s.', entry)
 
                 desired_pods += self.get_desired_pods(prefix, keys_per_pod,
                                                       min_pods, max_pods,
                                                       current_pods)
 
-                self.logger.debug("desired_pods now = {}".format(desired_pods))
+                self.logger.debug('desired_pods now = %s', desired_pods)
 
             # this is the most conservative bound
             if entries == []:
@@ -321,7 +327,9 @@ class Autoscaler(object):
 
             desired_pods = self.clip_pod_count(desired_pods, min_pods,
                                                max_pods, current_pods)
-            self.logger.debug("desired_pods clamped to {}".format(desired_pods))
+
+            if desired_pods > 0 and resource_type != 'job':
+                desired_pods = current_pods if current_pods > 0 else 1
 
             self.logger.debug('Scaling %s `%s`', resource_type, name)
 
@@ -334,5 +342,5 @@ class Autoscaler(object):
                                 resource_type, namespace, name)
 
     def scale(self):
-        self.tally_keys()
+        self.tally_queues()
         self.scale_primary_resources()

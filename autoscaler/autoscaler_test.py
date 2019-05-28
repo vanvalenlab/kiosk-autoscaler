@@ -28,6 +28,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import random
+import string
+
 import pytest
 import kubernetes
 
@@ -41,59 +44,12 @@ class Bunch(object):
 
 class DummyRedis(object):
 
-    def __init__(self, prefix='predict', status='new'):
-        self.prefix = '/'.join(x for x in prefix.split('/') if x)
-        self.status = status
-        self.fail_count = 0
-
-    def keys(self):
-        return [
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
-            '{}_{}_{}'.format('train', self.status, 'x.TIFF'),
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'done', 'x.tiff'),
-            '{}_{}_{}'.format('train', self.status, 'x.zip'),
-        ]
+    def llen(self, queue_name):
+        return len(queue_name)
 
     def scan_iter(self, match=None, count=None):
-        keys = [
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'failed', 'x.zip'),
-            '{}_{}_{}'.format('train', self.status, 'x.TIFF'),
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'done', 'x.tiff'),
-            '{}_{}_{}'.format('train', self.status, 'x.zip'),
-            'malformedKey'
-        ]
-        if match:
-            return (k for k in keys if k.startswith(match[:-1]))
-        return (k for k in keys)
-
-    def expected_keys(self, suffix=None):
-        for k in self.keys():
-            v = k.split('_')
-            if v[0] == self.prefix:
-                if v[1] == self.status:
-                    if suffix:
-                        if v[-1].lower().endswith(suffix):
-                            yield k
-                    else:
-                        yield k
-
-    def hget(self, rhash, field):
-        if field == 'status':
-            return rhash.split('_')[1]
-        elif field == 'file_name':
-            return rhash.split('_')[-1]
-        elif field == 'input_file_name':
-            return rhash.split('_')[-1]
-        elif field == 'output_file_name':
-            return rhash.split('_')[-1]
-        return False
-
-    def type(self, rhash):
-        return 'hash'
+        match = match if match else ''
+        yield match + random.choice(string.ascii_letters)
 
 
 class DummyKubernetes(object):
@@ -257,11 +213,11 @@ class TestAutoscaler(object):
         deployed_pods = scaler.get_current_pods('ns', 'job', 'pod2')
         assert deployed_pods == 2
 
-    def test_tally_keys(self):
+    def test_tally_queues(self):
         redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
-        scaler.tally_keys()
-        assert scaler.redis_keys == {'predict': 2, 'track': 0, 'train': 2}
+        scaler.tally_queues()
+        assert scaler.redis_keys == {'predict': 8, 'track': 6, 'train': 6}
 
     def test_scale_primary_resources(self):
         redis_client = DummyRedis()
@@ -340,7 +296,7 @@ class TestAutoscaler(object):
             global counter
             counter += 1
 
-        scaler.tally_keys = dummy_tally
+        scaler.tally_queues = dummy_tally
         scaler.scale_primary_resources = dummy_scale_resources
 
         scaler.scale()
