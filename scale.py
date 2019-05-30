@@ -34,6 +34,8 @@ import time
 import logging
 import logging.handlers
 
+from decouple import config
+
 import autoscaler
 
 
@@ -70,15 +72,15 @@ if __name__ == '__main__':
     _logger = logging.getLogger(__file__)
 
     REDIS_CLIENT = autoscaler.redis.RedisClient(
-        host=os.getenv('REDIS_HOST'),
-        port=os.getenv('REDIS_PORT'),
-        backoff=int(os.getenv('REDIS_INTERVAL', '1')))
+        host=config('REDIS_HOST', cast=str),
+        port=config('REDIS_PORT', default=6379, cast=int),
+        backoff=config('REDIS_INTERVAL', default=1, cast=int))
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
-        scaling_config=os.getenv('AUTOSCALING'))
+        scaling_config=config('AUTOSCALING'))
 
-    INTERVAL = int(os.getenv('INTERVAL', '5'))
+    INTERVAL = config('INTERVAL', default=5, cast=int)
 
     while True:
         try:
