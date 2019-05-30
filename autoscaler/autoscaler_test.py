@@ -274,6 +274,13 @@ class TestAutoscaler(object):
         scaler.get_desired_pods = lambda *x: 4
         scaler.scale_resources()
 
+        # test failure to scale does not crash
+        def fail_to_scale(*_, **__):
+            raise kubernetes.client.rest.ApiException(404)
+
+        scaler.scale_resource = fail_to_scale
+        scaler.scale_resources()
+
         # same delimiter throws an error;
         with pytest.raises(ValueError):
             param_delim = '|'

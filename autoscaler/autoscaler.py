@@ -338,8 +338,13 @@ class Autoscaler(object):
                               str(resource_type).capitalize(), name,
                               namespace, current_pods, desired_pods)
 
-            self.scale_resource(desired_pods, current_pods,
-                                resource_type, namespace, name)
+            try:
+                self.scale_resource(desired_pods, current_pods,
+                                    resource_type, namespace, name)
+            except kubernetes.client.rest.ApiException as err:
+                self.logger.warning('Failed to scale %s `%s.%s` due to %s: %s',
+                                    resource_type, namespace, name,
+                                    type(err).__name__, err)
 
     def scale(self):
         self.tally_queues()
