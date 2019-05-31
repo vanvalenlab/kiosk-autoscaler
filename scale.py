@@ -28,11 +28,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
-import sys
-import time
 import logging
 import logging.handlers
+import sys
+import time
+
+import decouple
 
 import autoscaler
 
@@ -70,15 +71,15 @@ if __name__ == '__main__':
     _logger = logging.getLogger(__file__)
 
     REDIS_CLIENT = autoscaler.redis.RedisClient(
-        host=os.getenv('REDIS_HOST'),
-        port=os.getenv('REDIS_PORT'),
-        backoff=int(os.getenv('REDIS_INTERVAL', '1')))
+        host=decouple.config('REDIS_HOST', cast=str),
+        port=decouple.config('REDIS_PORT', default=6379, cast=int),
+        backoff=decouple.config('REDIS_INTERVAL', default=1, cast=int))
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
-        scaling_config=os.getenv('AUTOSCALING'))
+        scaling_config=decouple.config('AUTOSCALING'))
 
-    INTERVAL = int(os.getenv('INTERVAL', '5'))
+    INTERVAL = decouple.config('INTERVAL', default=5, cast=int)
 
     while True:
         try:
