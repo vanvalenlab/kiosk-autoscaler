@@ -23,7 +23,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
-"""Fault tolerant Redis client wrapper class"""
+"""Fault tolerant RedisClient wrapper class"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -51,21 +51,27 @@ class RedisClient(object):
         redis_function = getattr(self._redis, name)
 
         def wrapper(*args, **kwargs):
+            values = list(args) + list(kwargs.values())
             while True:
                 try:
                     return redis_function(*args, **kwargs)
                 except redis.exceptions.ConnectionError as err:
-                    values = list(args) + list(kwargs.values())
                     self.logger.warning('Encountered %s: %s when calling '
                                         '`%s %s`. Retrying in %s seconds.',
                                         type(err).__name__, err,
                                         str(name).upper(),
                                         ' '.join(values), self.backoff)
                     time.sleep(self.backoff)
+                except redis.exceptions.ReadOnlyError as err:
+                    self.logger.warning('Encountered `READONLYERROR: %s` '
+                                        'Resetting connection and retrying '
+                                        'in %s seconds.', err, self.backoff)
+                    self._redis.connection_pool.reset()
+                    time.sleep(self.backoff)
                 except Exception as err:
-                    self.logger.error('Unexpected %s: %s when calling %s.',
+                    self.logger.error('Unexpected %s: %s when calling `%s %s`.',
                                       type(err).__name__, err,
-                                      str(name).upper())
+                                      str(name).upper(), ' '.join(values))
                     raise err
 
         return wrapper
