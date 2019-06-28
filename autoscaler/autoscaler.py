@@ -59,7 +59,6 @@ class Autoscaler(object):
             'predict': 0,
             'train': 0,
             'track': 0,
-            'notebook',
         }
 
         self.redis_client = redis_client
@@ -94,12 +93,17 @@ class Autoscaler(object):
                 if namespace_resource_type_name not in params:
                     params[namespace_resource_type_name] = []
 
+                prefix = str(entry[5]).strip()
+
                 params[namespace_resource_type_name].append({
                     'min_pods': int(entry[0]),
                     'max_pods': int(entry[1]),
                     'keys_per_pod': int(entry[2]),
-                    'prefix': str(entry[5]).strip(),
+                    'prefix': prefix,
                 })
+
+                if prefix not in self.redis_keys:
+                    self.redis_keys[prefix] = 0
 
             except (IndexError, ValueError):
                 self.logger.error('Autoscaling entry %s is malformed.', entry)

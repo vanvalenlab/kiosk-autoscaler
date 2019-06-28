@@ -98,15 +98,14 @@ class TestAutoscaler(object):
         primary_params = """
             1|2|3|namespace|resource_1|predict|name_1;
             4|5|6|namespace|resource_1|track|name_1;
-            7|8|9|namespace|resource_2|train|name_1
+            7|8|9|namespace|resource_2|train|name_1;
+            7|8|9|namespace|resource_3|newkey|name_1
             """.strip()
 
         redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client,
                                        primary_params)
-        print("printing primary autoscaling parameters")
-        print(scaler.autoscaling_params)
-        print("done printing")
+
         assert scaler.autoscaling_params == {
             ('namespace', 'resource_1', 'name_1'): [
                 {
@@ -125,6 +124,14 @@ class TestAutoscaler(object):
             ('namespace', 'resource_2', 'name_1'): [
                 {
                     "prefix": "train",
+                    "min_pods": 7,
+                    "max_pods": 8,
+                    "keys_per_pod": 9
+                }
+            ],
+            ('namespace', 'resource_3', 'name_1'): [
+                {
+                    "prefix": "newkey",
                     "min_pods": 7,
                     "max_pods": 8,
                     "keys_per_pod": 9
