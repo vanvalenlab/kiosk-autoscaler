@@ -55,6 +55,13 @@ class Autoscaler(object):
                              'different. Got "{}" and "{}".'.format(
                                  deployment_delim, param_delim))
 
+        self.redis_keys = {
+            'predict': 0,
+            'train': 0,
+            'track': 0,
+            'notebook',
+        }
+
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
@@ -63,12 +70,6 @@ class Autoscaler(object):
             scaling_config=scaling_config.rstrip(),
             deployment_delim=deployment_delim,
             param_delim=param_delim)
-
-        self.redis_keys = {
-            'predict': 0,
-            'train': 0,
-            'track': 0
-        }
 
         self.managed_resource_types = {'deployment', 'job'}
 
