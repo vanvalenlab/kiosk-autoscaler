@@ -33,7 +33,7 @@ import random
 import redis
 import pytest
 
-import autoscaler
+import redis_consumer
 
 
 class DummyRedis(object):
@@ -50,20 +50,27 @@ class DummyRedis(object):
             raise redis.exceptions.ConnectionError('thrown on purpose')
         return self.fail_count
 
+    def sentinel_masters(self):
+        return {'mymaster': {'ip': 'master', 'port': 6379}}
+
+    def sentinel_slaves(self, _):
+        n = random.randint(1, 4)
+        return [{'ip': 'slave', 'port': 6379} for i in range(n)]
+
 
 class TestRedis(object):
 
     def test_redis_client(self):  # pylint: disable=R0201
         fails = random.randint(1, 3)
-        Redis = autoscaler.redis.RedisClient
+        RedisClient = redis_consumer.redis.RedisClient
 
         # monkey patch _get_redis_client function to use DummyRedis client
         def _get_redis_client(*args, **kwargs):  # pylint: disable=W0613
             return DummyRedis(fail_tolerance=fails)
 
-        Redis._get_redis_client = _get_redis_client
+        RedisClient._get_redis_client = _get_redis_client
 
-        client = Redis(host='host', port='port', backoff=0)
+        client = RedisClient(host='host', port='port', backoff=0)
         assert client.get_fail_count() == fails
 
         with pytest.raises(AttributeError):
@@ -73,8 +80,8 @@ class TestRedis(object):
         def _get_redis_client_bad(*args, **kwargs):  # pylint: disable=W0613
             return DummyRedis(fail_tolerance=fails, hard_fail=True)
 
-        Redis._get_redis_client = _get_redis_client_bad
+        RedisClient._get_redis_client = _get_redis_client_bad
 
-        client = Redis(host='host', port='port', backoff=0)
+        client = RedisClient(host='host', port='port', backoff=0)
         with pytest.raises(AssertionError):
             client.get_fail_count()
