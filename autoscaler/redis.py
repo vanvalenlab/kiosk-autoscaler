@@ -171,6 +171,7 @@ class RedisClient(object):
 
         def wrapper(*args, **kwargs):
             values = list(args) + list(kwargs.values())
+            values = [str(v) for v in values]
             while True:
                 try:
                     return redis_function(*args, **kwargs)
