@@ -182,6 +182,17 @@ class RedisClient(object):
                                         str(name).upper(),
                                         ' '.join(values), self.backoff)
                     time.sleep(self.backoff)
+                except redis.exceptions.ResponseError as err:
+                    # check if redis just needs a backoff
+                    if 'BUSY' in str(err) and 'SCRIPT KILL' in str(err):
+                        self.logger.warning('Encountered %s: %s when calling '
+                                            '`%s %s`. Retrying in %s seconds.',
+                                            type(err).__name__, err,
+                                            str(name).upper(),
+                                            ' '.join(values), self.backoff)
+                        time.sleep(self.backoff)
+                    else:
+                        raise err
                 except Exception as err:
                     self.logger.error('Unexpected %s: %s when calling `%s %s`.',
                                       type(err).__name__, err,
