@@ -133,14 +133,12 @@ class Autoscaler(object):
     def get_apps_v1_client(self):
         """Returns Kubernetes API Client for AppsV1Api"""
         kubernetes.config.load_incluster_config()
-        kube_client = kubernetes.client.AppsV1Api()
-        return kube_client
+        return kubernetes.client.AppsV1Api()
 
     def get_batch_v1_client(self):
         """Returns Kubernetes API Client for AppsV1Api"""
         kubernetes.config.load_incluster_config()
-        kube_client = kubernetes.client.BatchV1Api()
-        return kube_client
+        return kubernetes.client.BatchV1Api()
 
     def list_namespaced_deployment(self, namespace):
         """Wrapper for `kubernetes.client.list_namespaced_deployment`"""
