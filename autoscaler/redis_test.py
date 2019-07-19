@@ -36,9 +36,11 @@ import pytest
 import autoscaler
 
 
+FAIL_COUNT = 0
+
+
 class DummyRedis(object):
     def __init__(self, fail_tolerance=0, hard_fail=False, err=None):
-        self.fail_count = 0
         self.fail_tolerance = fail_tolerance
         self.hard_fail = hard_fail
         if err is None:
@@ -46,12 +48,13 @@ class DummyRedis(object):
         self.err = err
 
     def get_fail_count(self):
+        global FAIL_COUNT
         if self.hard_fail:
             raise AssertionError('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
+        if FAIL_COUNT < self.fail_tolerance:
+            FAIL_COUNT += 1
             raise self.err
-        return self.fail_count
+        return FAIL_COUNT
 
     def sentinel_masters(self):
         return {'mymaster': {'ip': 'master', 'port': 6379}}
@@ -64,6 +67,8 @@ class DummyRedis(object):
 class TestRedis(object):
 
     def test_redis_client(self):  # pylint: disable=R0201
+        global FAIL_COUNT
+
         fails = random.randint(1, 3)
         RedisClient = autoscaler.redis.RedisClient
 
@@ -75,6 +80,7 @@ class TestRedis(object):
 
         client = RedisClient(host='host', port='port', backoff=0)
         assert client.get_fail_count() == fails
+        FAIL_COUNT = 0  # reset for the next test
 
         with pytest.raises(AttributeError):
             client.unknown_function()
@@ -88,6 +94,7 @@ class TestRedis(object):
 
         client = RedisClient(host='host', port='port', backoff=0)
         assert client.get_fail_count() == fails
+        FAIL_COUNT = 0  # reset for the next test
 
         # test ResponseError other - should fail
         def _get_redis_client_err(*args, **kwargs):  # pylint: disable=W0613

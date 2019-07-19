@@ -162,20 +162,21 @@ class RedisClient(object):
                                  charset='utf-8')
 
     def __getattr__(self, name):
-        if name in REDIS_READONLY_COMMANDS:
-            redis_client = random.choice(self._redis_slaves)
-        else:
-            redis_client = self._redis_master
-
-        redis_function = getattr(redis_client, name)
 
         def wrapper(*args, **kwargs):
             values = list(args) + list(kwargs.values())
             values = [str(v) for v in values]
             while True:
                 try:
+                    if name in REDIS_READONLY_COMMANDS:
+                        redis_client = random.choice(self._redis_slaves)
+                    else:
+                        redis_client = self._redis_master
+
+                    redis_function = getattr(redis_client, name)
                     return redis_function(*args, **kwargs)
                 except redis.exceptions.ConnectionError as err:
+                    self._update_masters_and_slaves()
                     self.logger.warning('Encountered %s: %s when calling '
                                         '`%s %s`. Retrying in %s seconds.',
                                         type(err).__name__, err,
