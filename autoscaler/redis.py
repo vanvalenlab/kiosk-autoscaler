@@ -134,8 +134,6 @@ class RedisClient(object):
 
     def _update_masters_and_slaves(self):
         try:
-            self._sentinel.sentinel_masters()
-
             sentinel_masters = self._sentinel.sentinel_masters()
 
             for master_set in sentinel_masters:
