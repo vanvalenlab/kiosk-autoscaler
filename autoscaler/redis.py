@@ -154,7 +154,8 @@ class RedisClient(object):
             self.logger.warning('Encountered Error: %s. Using sentinel as '
                                 'primary redis client.', err)
 
-    def _get_redis_client(self, host, port):  # pylint: disable=R0201
+    @classmethod
+    def _get_redis_client(cls, host, port):
         return redis.StrictRedis(host=host, port=port,
                                  decode_responses=True,
                                  charset='utf-8')
