@@ -36,45 +36,83 @@ import pytest
 import autoscaler
 
 
+FAIL_COUNT = 0
+
+
 class DummyRedis(object):
-    def __init__(self, fail_tolerance=0, hard_fail=False):
-        self.fail_count = 0
+    def __init__(self, fail_tolerance=0, hard_fail=False, err=None):
         self.fail_tolerance = fail_tolerance
         self.hard_fail = hard_fail
+        if err is None:
+            err = redis.exceptions.ConnectionError('thrown on purpose')
+        self.err = err
 
     def get_fail_count(self):
+        global FAIL_COUNT
         if self.hard_fail:
             raise AssertionError('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
-        return self.fail_count
+        if FAIL_COUNT < self.fail_tolerance:
+            FAIL_COUNT += 1
+            raise self.err
+        return FAIL_COUNT
+
+    def sentinel_masters(self):
+        return {'mymaster': {'ip': 'master', 'port': 6379}}
+
+    def sentinel_slaves(self, _):
+        n = random.randint(1, 4)
+        return [{'ip': 'slave', 'port': 6379} for i in range(n)]
 
 
 class TestRedis(object):
 
     def test_redis_client(self):  # pylint: disable=R0201
+        global FAIL_COUNT
+
         fails = random.randint(1, 3)
-        Redis = autoscaler.redis.RedisClient
+        RedisClient = autoscaler.redis.RedisClient
 
         # monkey patch _get_redis_client function to use DummyRedis client
         def _get_redis_client(*args, **kwargs):  # pylint: disable=W0613
             return DummyRedis(fail_tolerance=fails)
 
-        Redis._get_redis_client = _get_redis_client
+        RedisClient._get_redis_client = _get_redis_client
 
-        client = Redis(host='host', port='port', backoff=0)
+        client = RedisClient(host='host', port='port', backoff=0)
         assert client.get_fail_count() == fails
+        FAIL_COUNT = 0  # reset for the next test
 
         with pytest.raises(AttributeError):
             client.unknown_function()
+
+        # test ResponseError BUSY - should retry
+        def _get_redis_client_retry(*args, **kwargs):  # pylint: disable=W0613
+            err = redis.exceptions.ResponseError('BUSY SCRIPT KILL')
+            return DummyRedis(fail_tolerance=fails, err=err)
+
+        RedisClient._get_redis_client = _get_redis_client_retry
+
+        client = RedisClient(host='host', port='port', backoff=0)
+        assert client.get_fail_count() == fails
+        FAIL_COUNT = 0  # reset for the next test
+
+        # test ResponseError other - should fail
+        def _get_redis_client_err(*args, **kwargs):  # pylint: disable=W0613
+            err = redis.exceptions.ResponseError('OTHER ERROR')
+            return DummyRedis(fail_tolerance=fails, err=err)
+
+        RedisClient._get_redis_client = _get_redis_client_err
+        client = RedisClient(host='host', port='port', backoff=0)
+
+        with pytest.raises(redis.exceptions.ResponseError):
+            client.get_fail_count()
 
         # test that other exceptions will raise.
         def _get_redis_client_bad(*args, **kwargs):  # pylint: disable=W0613
             return DummyRedis(fail_tolerance=fails, hard_fail=True)
 
-        Redis._get_redis_client = _get_redis_client_bad
+        RedisClient._get_redis_client = _get_redis_client_bad
 
-        client = Redis(host='host', port='port', backoff=0)
+        client = RedisClient(host='host', port='port', backoff=0)
         with pytest.raises(AssertionError):
             client.get_fail_count()
