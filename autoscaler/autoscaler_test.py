@@ -142,7 +142,7 @@ class TestAutoscaler(object):
     def test_get_desired_pods(self):
         # key, keys_per_pod, min_pods, max_pods, current_pods
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None')
         scaler.redis_keys['predict'] = 10
         # desired_pods is > max_pods
         desired_pods = scaler.get_desired_pods('predict', 2, 0, 2, 1)
@@ -159,7 +159,7 @@ class TestAutoscaler(object):
 
     def test_list_namespaced_deployment(self):
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None')
         # test ApiException is logged and thrown
         scaler.get_apps_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
@@ -167,7 +167,7 @@ class TestAutoscaler(object):
 
     def test_list_namespaced_job(self):
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None')
         # test ApiException is logged and thrown
         scaler.get_batch_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
@@ -175,7 +175,7 @@ class TestAutoscaler(object):
 
     def test_patch_namespaced_deployment(self):
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None')
         # test ApiException is logged and thrown
         scaler.get_apps_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
@@ -184,7 +184,7 @@ class TestAutoscaler(object):
 
     def test_patch_namespaced_job(self):
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None')
         # test ApiException is logged and thrown
         scaler.get_batch_v1_client = lambda: DummyKubernetes(fail=True)
         with pytest.raises(kubernetes.client.rest.ApiException):
@@ -193,7 +193,7 @@ class TestAutoscaler(object):
 
     def test_get_current_pods(self):
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None')
 
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -222,7 +222,12 @@ class TestAutoscaler(object):
 
     def test_tally_queues(self):
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'predict')
+        scaler.tally_queues()
+        assert scaler.redis_keys == {'predict': 8}
+
+        redis_client = DummyRedis()
+        scaler = autoscaler.Autoscaler(redis_client, 'None', 'predict,track,train')
         scaler.tally_queues()
         assert scaler.redis_keys == {'predict': 8, 'track': 6, 'train': 6}
 
@@ -239,8 +244,9 @@ class TestAutoscaler(object):
         # non-integer values will warn, but not raise (or autoscale)
         bad_params = ['f0', 'f1', 'f3', 'ns', 'job', 'train', 'name']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
-                                       param_delim)
+        scaler = autoscaler.Autoscaler(redis_client, p,
+                                       deployment_delim=deployment_delim,
+                                       param_delim=param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
         scaler.scale_resources()
@@ -248,8 +254,9 @@ class TestAutoscaler(object):
         # not enough params will warn, but not raise (or autoscale)
         bad_params = ['0', '1', '3', 'ns', 'job', 'train']
         p = deployment_delim.join([param_delim.join(bad_params)])
-        scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
-                                       param_delim)
+        scaler = autoscaler.Autoscaler(redis_client, p,
+                                       deployment_delim=deployment_delim,
+                                       param_delim=param_delim)
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
         scaler.scale_resources()
@@ -258,8 +265,9 @@ class TestAutoscaler(object):
         with pytest.raises(ValueError):
             bad_params = ['0', '1', '3', 'ns', 'bad_type', 'train', 'name']
             p = deployment_delim.join([param_delim.join(bad_params)])
-            scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
-                                           param_delim)
+            scaler = autoscaler.Autoscaler(redis_client, p,
+                                           deployment_delim=deployment_delim,
+                                           param_delim=param_delim)
             scaler.get_apps_v1_client = DummyKubernetes
             scaler.get_batch_v1_client = DummyKubernetes
             scaler.scale_resources()
@@ -270,8 +278,9 @@ class TestAutoscaler(object):
         params = [deploy_params, job_params]
         p = deployment_delim.join([param_delim.join(p) for p in params])
 
-        scaler = autoscaler.Autoscaler(redis_client, p, deployment_delim,
-                                       param_delim)
+        scaler = autoscaler.Autoscaler(redis_client, p,
+                                       deployment_delim=deployment_delim,
+                                       param_delim=param_delim)
 
         scaler.get_apps_v1_client = DummyKubernetes
         scaler.get_batch_v1_client = DummyKubernetes
@@ -293,11 +302,13 @@ class TestAutoscaler(object):
             param_delim = '|'
             deployment_delim = '|'
             p = deployment_delim.join([param_delim.join(p) for p in params])
-            autoscaler.Autoscaler(None, p, deployment_delim, param_delim)
+            scaler = autoscaler.Autoscaler(None, p,
+                                           deployment_delim=deployment_delim,
+                                           param_delim=param_delim)
 
     def test_scale(self):
         redis_client = DummyRedis()
-        scaler = autoscaler.Autoscaler(redis_client, 'None', 'None')
+        scaler = autoscaler.Autoscaler(redis_client, 'None')
 
         global counter
         counter = 0
