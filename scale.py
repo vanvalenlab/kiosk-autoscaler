@@ -77,7 +77,8 @@ if __name__ == '__main__':
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
-        scaling_config=decouple.config('AUTOSCALING'))
+        scaling_config=decouple.config('AUTOSCALING'),
+        queues=decouple.config('QUEUES', 'predict,track,train'))
 
     INTERVAL = decouple.config('INTERVAL', default=5, cast=int)
 
