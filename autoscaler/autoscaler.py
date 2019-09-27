@@ -47,6 +47,8 @@ class Autoscaler(object):
     def __init__(self,
                  redis_client,
                  scaling_config,
+                 queues='predict',
+                 queue_delim=',',
                  deployment_delim=';',
                  param_delim='|'):
 
@@ -55,11 +57,7 @@ class Autoscaler(object):
                              'different. Got "{}" and "{}".'.format(
                                  deployment_delim, param_delim))
 
-        self.redis_keys = {
-            'predict': 0,
-            'train': 0,
-            'track': 0,
-        }
+        self.redis_keys = {q: 0 for q in queues.split(queue_delim)}
 
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
