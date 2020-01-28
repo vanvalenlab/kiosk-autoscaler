@@ -71,14 +71,15 @@ if __name__ == '__main__':
     _logger = logging.getLogger(__file__)
 
     REDIS_CLIENT = autoscaler.redis.RedisClient(
-        host=decouple.config('REDIS_HOST', cast=str),
+        host=decouple.config('REDIS_HOST', cast=str, default='redis-master'),
         port=decouple.config('REDIS_PORT', default=6379, cast=int),
         backoff=decouple.config('REDIS_INTERVAL', default=1, cast=int))
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
         scaling_config=decouple.config('AUTOSCALING'),
-        queues=decouple.config('QUEUES', 'predict,track,train'))
+        queues=decouple.config('QUEUES', 'predict,track', cast=str),
+        queue_delim=decouple.config('QUEUE_DELIMITER', ',', cast=str))
 
     INTERVAL = decouple.config('INTERVAL', default=5, cast=int)
 
