@@ -11,7 +11,7 @@ The Autoscaler is configured using environment variables. Please find a table of
 
 | Name | Description | Default Value |
 | :---: | :---: | :---: |
-| `AUTOSCALING` | A list of scaling configurations, associating certain GPU resources with Redis queues. | **REQUIRED**. No default is used. |
+| `AUTOSCALING` | A list of scaling configurations, associating certain GPU resources with Redis queues. | **REQUIRED.** |
 | `INTERVAL` | How frequently the autoscaler checks for required resources, in seconds. | 5 |
 | `QUEUES` | A `QUEUE_DELIMITER` separated list of work queues to monitor. | "predict,track" |
 | `QUEUE_DELIMITER` | A string used to separate a list of queue names in `QUEUES`. | "," |
