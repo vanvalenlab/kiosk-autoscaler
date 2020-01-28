@@ -7,7 +7,7 @@ The `kiosk-autoscaler` turns on GPU resources when they are required and turns t
 
 ## Configuration
 
-The Autoscaler is configured using environment variables. Please find a table of all environment variables and their description below.
+The Autoscaler is configured using environment variables. Please find a table of all environment variables and their descriptions below.
 
 | Name | Description | Default Value |
 | :---: | :---: | :---: |
