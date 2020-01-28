@@ -10,7 +10,7 @@ The `kiosk-autoscaler` turns on GPU resources when they are required and turns t
 The Autoscaler is configured using environment variables. Please find a table of all environment variables and their descriptions below.
 
 | Name | Description | Default Value |
-| :---: | :---: | :---: |
+| :--- | :--- | :--- |
 | `AUTOSCALING` | A list of scaling configurations, associating certain GPU resources with Redis queues. | **REQUIRED** |
 | `INTERVAL` | How frequently the autoscaler checks for required resources, in seconds. | 5 |
 | `QUEUES` | A `QUEUE_DELIMITER` separated list of work queues to monitor. | "predict,track" |
