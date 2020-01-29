@@ -46,16 +46,8 @@ class Autoscaler(object):
 
     def __init__(self,
                  redis_client,
-                 scaling_config,
                  queues='predict',
-                 queue_delim=',',
-                 deployment_delim=';',
-                 param_delim='|'):
-
-        if deployment_delim == param_delim:
-            raise ValueError('`deployment_delim` and `param_delim` must be '
-                             'different. Got "{}" and "{}".'.format(
-                                 deployment_delim, param_delim))
+                 queue_delim=','):
 
         self.redis_keys = {q: 0 for q in queues.split(queue_delim)}
 
@@ -63,51 +55,7 @@ class Autoscaler(object):
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.completed_statuses = {'done', 'failed'}
 
-        self.autoscaling_params = self._get_autoscaling_params(
-            scaling_config=scaling_config.rstrip(),
-            deployment_delim=deployment_delim,
-            param_delim=param_delim)
-
         self.managed_resource_types = {'deployment', 'job'}
-
-        self.reference_pods = {}
-
-    def _get_autoscaling_params(self,
-                                scaling_config,
-                                deployment_delim=';',
-                                param_delim='|'):
-        raw_params = [x.split(param_delim)
-                      for x in scaling_config.split(deployment_delim)]
-
-        params = {}
-        for entry in raw_params:
-            try:
-                namespace_resource_type_name = (
-                    str(entry[3]).strip(),
-                    str(entry[4]).strip(),
-                    str(entry[6]).strip(),
-                )
-
-                if namespace_resource_type_name not in params:
-                    params[namespace_resource_type_name] = []
-
-                prefix = str(entry[5]).strip()
-
-                params[namespace_resource_type_name].append({
-                    'min_pods': int(entry[0]),
-                    'max_pods': int(entry[1]),
-                    'keys_per_pod': int(entry[2]),
-                    'prefix': prefix,
-                })
-
-                if prefix not in self.redis_keys:
-                    self.redis_keys[prefix] = 0
-
-            except (IndexError, ValueError):
-                self.logger.error('Autoscaling entry %s is malformed.', entry)
-                continue
-
-        return params
 
     def tally_queues(self):
         """Update counts of all redis queues"""
@@ -120,7 +68,7 @@ class Autoscaler(object):
 
             processing_q = 'processing-{}:*'.format(q)
             scan = self.redis_client.scan_iter(match=processing_q, count=1000)
-            num_in_progress = len([x for x in scan])
+            num_in_progress = len([x for x in scan])  # pylint: disable=R1721
 
             self.redis_keys[q] = num_items + num_in_progress
 
@@ -272,6 +220,10 @@ class Autoscaler(object):
 
     def scale_resource(self, desired_pods, current_pods,
                        resource_type, namespace, name):
+
+        if resource_type not in self.managed_resource_types:
+            raise ValueError('Cannot scale resource type: %s' % resource_type)
+
         if desired_pods == current_pods:
             return  # no scaling action is required
 
@@ -280,7 +232,7 @@ class Autoscaler(object):
             body = {'spec': {'parallelism': desired_pods}}
             res = self.patch_namespaced_job(name, namespace, body)
 
-        elif resource_type == 'deployment':
+        if resource_type == 'deployment':
             body = {'spec': {'replicas': desired_pods}}
             res = self.patch_namespaced_deployment(name, namespace, body)
 
@@ -289,64 +241,33 @@ class Autoscaler(object):
                          namespace, current_pods, desired_pods)
         return True
 
-    def scale_resources(self):
-        """Scale each resource defined in `autoscaling_params`"""
-        self.logger.debug('Scaling primary resources.')
-        for fingerprint, entries in self.autoscaling_params.items():
-            # iterate through all entries with this fingerprint
-            namespace, resource_type, name = fingerprint
+    def scale(self, namespace, resource_type, name,
+              min_pods=0, max_pods=1, keys_per_pod=1):
 
-            self.logger.debug('Scaling %s `%s.%s` with %s config entries.',
-                              resource_type, namespace, name, len(entries))
-
-            # Sum up the current and desired pods over all entries
-            current_pods = self.get_current_pods(namespace, resource_type, name)
-            desired_pods = 0
-
-            min_pods_for_all_entries = []
-            max_pods_for_all_entries = []
-
-            if entries == []:  # this is the most conservative bound
-                self.logger.warning('%s `%s.%s` has no autoscaling entry.',
-                                    str(resource_type).capitalize(),
-                                    namespace, name)
-                continue
-
-            for entry in entries:
-                min_pods = entry['min_pods']
-                max_pods = entry['max_pods']
-                keys_per_pod = entry['keys_per_pod']
-                prefix = entry['prefix']
-
-                min_pods_for_all_entries.append(min_pods)
-                max_pods_for_all_entries.append(max_pods)
-
-                desired_pods += self.get_desired_pods(prefix, keys_per_pod,
-                                                      min_pods, max_pods,
-                                                      current_pods)
-
-            min_pods = max(min_pods_for_all_entries)
-            max_pods = min(max_pods_for_all_entries)
-
-            desired_pods = self.clip_pod_count(desired_pods, min_pods,
-                                               max_pods, current_pods)
-
-            if desired_pods > 0 and resource_type != 'job':
-                desired_pods = current_pods if current_pods > 0 else 1
-
-            self.logger.debug('%s `%s` in namespace `%s` has a current state '
-                              'of %s pods and a desired state of %s pods.',
-                              str(resource_type).capitalize(), name,
-                              namespace, current_pods, desired_pods)
-
-            try:
-                self.scale_resource(desired_pods, current_pods,
-                                    resource_type, namespace, name)
-            except kubernetes.client.rest.ApiException as err:
-                self.logger.warning('Failed to scale %s `%s.%s` due to %s: %s',
-                                    resource_type, namespace, name,
-                                    type(err).__name__, err)
-
-    def scale(self):
         self.tally_queues()
-        self.scale_resources()
+
+        self.logger.debug('Scaling %s `%s.%s`.',
+                          resource_type, namespace, name)
+
+        current_pods = self.get_current_pods(namespace, resource_type, name)
+
+        desired_pods = 0
+        for key in self.redis_keys:
+            desired_pods += self.get_desired_pods(key, keys_per_pod, min_pods,
+                                                  max_pods, current_pods)
+
+        desired_pods = self.clip_pod_count(desired_pods, min_pods,
+                                           max_pods, current_pods)
+
+        self.logger.debug('%s `%s` in namespace `%s` has a current state '
+                          'of %s pods and a desired state of %s pods.',
+                          str(resource_type).capitalize(), name,
+                          namespace, current_pods, desired_pods)
+
+        try:
+            self.scale_resource(desired_pods, current_pods,
+                                resource_type, namespace, name)
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.warning('Failed to scale %s `%s.%s` due to %s: %s',
+                                resource_type, namespace, name,
+                                type(err).__name__, err)
