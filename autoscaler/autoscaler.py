@@ -272,6 +272,10 @@ class Autoscaler(object):
 
     def scale_resource(self, desired_pods, current_pods,
                        resource_type, namespace, name):
+
+        if resource_type not in self.managed_resource_types:
+            raise ValueError('Cannot scale resource type: %s' % resource_type)
+
         if desired_pods == current_pods:
             return  # no scaling action is required
 
@@ -280,7 +284,7 @@ class Autoscaler(object):
             body = {'spec': {'parallelism': desired_pods}}
             res = self.patch_namespaced_job(name, namespace, body)
 
-        elif resource_type == 'deployment':
+        if resource_type == 'deployment':
             body = {'spec': {'replicas': desired_pods}}
             res = self.patch_namespaced_deployment(name, namespace, body)
 
