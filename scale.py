@@ -84,7 +84,7 @@ if __name__ == '__main__':
 
     RESOURCE_NAMESPACE = decouple.config('RESOURCE_NAMESPACE', default='default')
     RESOURCE_TYPE = decouple.config('RESOURCE_TYPE', default='deployment')
-    RESOURCE_NAME = decouple.config('RESOURCE_TYPE')
+    RESOURCE_NAME = decouple.config('RESOURCE_NAME')
 
     MIN_PODS = decouple.config('MIN_PODS', default=0, cast=int)
     MAX_PODS = decouple.config('MAX_PODS', default=1, cast=int)
