@@ -77,15 +77,27 @@ if __name__ == '__main__':
 
     SCALER = autoscaler.Autoscaler(
         redis_client=REDIS_CLIENT,
-        scaling_config=decouple.config('AUTOSCALING'),
-        queues=decouple.config('QUEUES', 'predict,track', cast=str),
+        queues=decouple.config('QUEUES', default='predict,track', cast=str),
         queue_delim=decouple.config('QUEUE_DELIMITER', ',', cast=str))
 
     INTERVAL = decouple.config('INTERVAL', default=5, cast=int)
 
+    RESOURCE_NAMESPACE = decouple.config('RESOURCE_NAMESPACE', default='default')
+    RESOURCE_TYPE = decouple.config('RESOURCE_TYPE', default='deployment')
+    RESOURCE_NAME = decouple.config('RESOURCE_TYPE')
+
+    MIN_PODS = decouple.config('MIN_PODS', default=0, cast=int)
+    MAX_PODS = decouple.config('MAX_PODS', default=1, cast=int)
+    KEYS_PER_POD = decouple.config('KEYS_PER_POD', default=1, cast=int)
+
     while True:
         try:
-            SCALER.scale()
+            SCALER.scale(namespace=RESOURCE_NAMESPACE,
+                         resource_type=RESOURCE_TYPE,
+                         name=RESOURCE_NAME,
+                         min_pods=MIN_PODS,
+                         max_pods=MAX_PODS,
+                         keys_per_pod=KEYS_PER_POD)
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)

@@ -11,10 +11,15 @@ The Autoscaler is configured using environment variables. Please find a table of
 
 | Name | Description | Default Value |
 | :--- | :--- | :--- |
-| `AUTOSCALING` | **REQUIRED**: A list of scaling configurations, associating certain GPU resources with Redis queues. |  |
-| `INTERVAL` | How frequently the autoscaler checks for required resources, in seconds. | `5` |
-| `QUEUES` | A `QUEUE_DELIMITER` separated list of work queues to monitor. | `predict,track` |
+| `QUEUES` | **REQUIRED**: A `QUEUE_DELIMITER` separated list of work queues to monitor. | `predict,track` |
 | `QUEUE_DELIMITER` | A string used to separate a list of queue names in `QUEUES`. | `,` |
+| `RESOURCE_NAME` | **REQUIRED**: The name of the resource to scale. |  |
+| `RESOURCE_TYPE` | The resource type of `RESOURCE_NAME`, one of `deployment` or `job`. | `deployment` |
+| `RESOURCE_NAMESPACE` | The k8s namespace of `RESOURCE_NAME`. | `default` |
+| `INTERVAL` | How frequently the autoscaler checks for required resources, in seconds. | `5` |
 | `REDIS_HOST` | The IP address or hostname of Redis. | `redis-master` |
 | `REDIS_PORT` | The port used to connect to Redis. | `6379` |
 | `REDIS_INTERVAL` | Time to wait between Redis ConnectionErrors, in seconds. | `1` |
+| `MAX_PODS` | The maximum number of pods to scale up. Should be `1`. | `1` |
+| `MIN_PODS` | The minimum number of pods to scale down. Should be `0`. | `0` |
+| `KEYS_PER_POD` | The number of work keys per instance of `RESOURCE_NAME`. Should be `1`. | `1` |
