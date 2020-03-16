@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.com/vanvalenlab/kiosk-autoscaler.svg?branch=master)](https://travis-ci.com/vanvalenlab/kiosk-autoscaler)
 [![Coverage Status](https://coveralls.io/repos/github/vanvalenlab/kiosk-autoscaler/badge.svg?branch=master)](https://coveralls.io/github/vanvalenlab/kiosk-autoscaler?branch=master)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/vanvalenlab/kiosk-autoscaler/blob/master/LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](/LICENSE)
 
 The `kiosk-autoscaler` turns on GPU resources when they are required and turns them back off when they are not needed, minimizing GPU costs for the DeepCell Kiosk.
 
