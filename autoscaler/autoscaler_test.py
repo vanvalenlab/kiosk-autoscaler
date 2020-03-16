@@ -185,7 +185,8 @@ class TestAutoscaler(object):
         redis_client = DummyRedis()
         qd = ','
 
-        def expected(x): return sum([len(q) for q in x.split(qd)])
+        def expected(x):
+            return sum([len(q) for q in x.split(qd)])
 
         queue = 'queue'
         scaler = autoscaler.Autoscaler(
