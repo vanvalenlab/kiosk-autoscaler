@@ -28,6 +28,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import gc
 import logging
 import logging.handlers
 import sys
@@ -98,6 +99,7 @@ if __name__ == '__main__':
                          min_pods=MIN_PODS,
                          max_pods=MAX_PODS,
                          keys_per_pod=KEYS_PER_POD)
+            gc.collect()
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
