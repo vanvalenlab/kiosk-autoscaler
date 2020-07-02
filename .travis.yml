@@ -15,7 +15,7 @@ cache: pip
 
 install:
   - pip install -r requirements.txt
-  - pip install pytest pytest-cov==2.5.1 pytest-mock pytest-pep8 fakeredis coveralls
+  - pip install -r requirements-test.txt
 
 script:
   - pytest --cov=autoscaler --pep8 autoscaler
