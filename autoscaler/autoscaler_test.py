@@ -38,11 +38,6 @@ import fakeredis
 import autoscaler
 
 
-class Bunch(object):
-    def __init__(self, **kwds):
-        self.__dict__.update(kwds)
-
-
 @pytest.fixture
 def redis_client():
     yield fakeredis.FakeStrictRedis()
@@ -50,6 +45,11 @@ def redis_client():
 
 def kube_error(*_, **__):
     raise kubernetes.client.rest.ApiException('thrown on purpose')
+
+
+class Bunch(object):
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds)
 
 
 class DummyKubernetes(object):
