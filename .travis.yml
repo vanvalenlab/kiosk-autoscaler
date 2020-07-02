@@ -19,7 +19,7 @@ install:
   - pip install -r requirements-test.txt
 
 script:
-  - pytest --cov=autoscaler --pep8 autoscaler
+  - pytest --cov=autoscaler --pep8
 
 jobs:
   include:
