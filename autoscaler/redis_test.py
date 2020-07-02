@@ -29,90 +29,113 @@ from __future__ import division
 from __future__ import print_function
 
 import random
+import time
 
+import fakeredis
 import redis
 import pytest
 
-import autoscaler
+from autoscaler.redis import RedisClient
 
 
-FAIL_COUNT = 0
+class WrappedFakeStrictRedis(fakeredis.FakeStrictRedis):
+    """Wrapper around fakeredis instance to mock errors and sentinel mode."""
 
+    def __init__(self, *_, **kwargs):
+        super(WrappedFakeStrictRedis, self).__init__(decode_responses='utf8')
+        self.should_fail = kwargs.get('should_fail', False)
 
-class DummyRedis(object):
-    def __init__(self, fail_tolerance=0, hard_fail=False, err=None):
-        self.fail_tolerance = fail_tolerance
-        self.hard_fail = hard_fail
-        if err is None:
-            err = redis.exceptions.ConnectionError('thrown on purpose')
-        self.err = err
-
-    def get_fail_count(self):
-        global FAIL_COUNT
-        if self.hard_fail:
-            raise AssertionError('thrown on purpose')
-        if FAIL_COUNT < self.fail_tolerance:
-            FAIL_COUNT += 1
-            raise self.err
-        return FAIL_COUNT
-
-    def sentinel_masters(self):
+    def sentinel_masters(self, *_, **__):
         return {'mymaster': {'ip': 'master', 'port': 6379}}
 
-    def sentinel_slaves(self, _):
-        n = random.randint(1, 4)
+    def sentinel_slaves(self, *_, **__):
+        n = random.randint(2, 5)
         return [{'ip': 'slave', 'port': 6379} for i in range(n)]
+
+    def busy_error(self, *_, **__):
+        if self.should_fail:
+            self.should_fail = False
+            raise redis.exceptions.ResponseError('BUSY SCRIPT KILL ERROR')
+        return True
+
+    def connect_error(self, *_, **__):
+        if self.should_fail:
+            self.should_fail = False
+            raise redis.exceptions.ConnectionError('thrown on purpose')
+        return True
+
+    def fail(self, *_, **__):
+        raise redis.exceptions.ResponseError('thrown on purpose')
 
 
 class TestRedis(object):
+    # pylint: disable=R0201
 
-    def test_redis_client(self):  # pylint: disable=R0201
-        global FAIL_COUNT
-
-        fails = random.randint(1, 3)
-        RedisClient = autoscaler.redis.RedisClient
-
-        # monkey patch _get_redis_client function to use DummyRedis client
-        def _get_redis_client(*args, **kwargs):  # pylint: disable=W0613
-            return DummyRedis(fail_tolerance=fails)
-
-        RedisClient._get_redis_client = _get_redis_client
+    def test_successful_command(self, mocker):
+        mocker.patch('redis.StrictRedis', WrappedFakeStrictRedis)
+        mocker.patch('autoscaler.redis.RedisClient._update_masters_and_slaves')
 
         client = RedisClient(host='host', port='port', backoff=0)
-        assert client.get_fail_count() == fails
-        FAIL_COUNT = 0  # reset for the next test
 
+        # send some test requests using fakeredis
+        key = 'job_id'
+        values = {'data': str(random.randint(0, 100))}
+
+        client.hmset(key, values)  # Non-readonly
+        new_values = client.hgetall(key)
+
+        assert new_values == values
+
+        # test attribute error is thrown if invalid command.
         with pytest.raises(AttributeError):
             client.unknown_function()
 
-        # test ResponseError BUSY - should retry
-        def _get_redis_client_retry(*args, **kwargs):  # pylint: disable=W0613
-            err = redis.exceptions.ResponseError('BUSY SCRIPT KILL')
-            return DummyRedis(fail_tolerance=fails, err=err)
-
-        RedisClient._get_redis_client = _get_redis_client_retry
-
-        client = RedisClient(host='host', port='port', backoff=0)
-        assert client.get_fail_count() == fails
-        FAIL_COUNT = 0  # reset for the next test
-
-        # test ResponseError other - should fail
-        def _get_redis_client_err(*args, **kwargs):  # pylint: disable=W0613
-            err = redis.exceptions.ResponseError('OTHER ERROR')
-            return DummyRedis(fail_tolerance=fails, err=err)
-
-        RedisClient._get_redis_client = _get_redis_client_err
+    def test__update_masters_and_slaves(self, mocker):
+        mocker.patch('redis.StrictRedis', WrappedFakeStrictRedis)
         client = RedisClient(host='host', port='port', backoff=0)
 
+        master = client._redis_master
+        slaves = client._redis_slaves
+
+        # new master is same class but different instance.
+        assert isinstance(master, WrappedFakeStrictRedis)
+        assert isinstance(master, type(client._sentinel))
+        assert master is not client._sentinel
+
+        # starts with 1 slave, but should be 2 - 4 from mocked update.
+        assert len(slaves) > 1
+        for slave in slaves:
+            assert isinstance(slave, WrappedFakeStrictRedis)
+            assert isinstance(slave, type(client._sentinel))
+            assert slave is not client._sentinel
+
+        # test response error does not raise
+        def redis_response_error(*_, **__):
+            raise redis.exceptions.ResponseError('thrown on purpose')
+
+        mocker.patch('autoscaler.redis.RedisClient._get_redis_client',
+                     redis_response_error)
+        client._update_masters_and_slaves()
+
+    def test_error_handling(self, mocker):
+        mocker.patch('redis.StrictRedis',
+                     lambda *_, **__: WrappedFakeStrictRedis(should_fail=True))
+        mocker.patch('autoscaler.redis.RedisClient._update_masters_and_slaves')
+
+        client = RedisClient(host='host', port='port', backoff=0)
         with pytest.raises(redis.exceptions.ResponseError):
-            client.get_fail_count()
+            client.fail()
 
-        # test that other exceptions will raise.
-        def _get_redis_client_bad(*args, **kwargs):  # pylint: disable=W0613
-            return DummyRedis(fail_tolerance=fails, hard_fail=True)
-
-        RedisClient._get_redis_client = _get_redis_client_bad
-
+        # mocked up ConnectionError
         client = RedisClient(host='host', port='port', backoff=0)
-        with pytest.raises(AssertionError):
-            client.get_fail_count()
+        spy = mocker.spy(client, '_update_masters_and_slaves')
+        response = client.connect_error()
+        assert response
+        spy.assert_called_once_with()
+
+        # mocked up retry-able ResponseError
+        client = RedisClient(host='host', port='port', backoff=0)
+        spy = mocker.spy(time, 'sleep')
+        response = client.busy_error()
+        assert response
+        spy.assert_called_once_with(client.backoff)
