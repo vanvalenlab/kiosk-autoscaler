@@ -1,4 +1,3 @@
-sudo: true
 dist: xenial
 
 git:
@@ -16,7 +15,7 @@ cache: pip
 
 install:
   - pip install -r requirements.txt
-  - pip install pytest pytest-cov==2.5.1 pytest-mock pytest-pep8 coveralls
+  - pip install pytest pytest-cov==2.5.1 pytest-mock pytest-pep8 fakeredis coveralls
 
 script:
   - pytest --cov=autoscaler --pep8 autoscaler

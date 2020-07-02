@@ -33,6 +33,7 @@ import string
 
 import pytest
 import kubernetes
+import fakeredis
 
 import autoscaler
 
@@ -42,24 +43,18 @@ class Bunch(object):
         self.__dict__.update(kwds)
 
 
-class DummyRedis(object):
+@pytest.fixture
+def redis_client():
+    yield fakeredis.FakeStrictRedis()
 
-    def llen(self, queue_name):
-        return len(queue_name)
 
-    def scan_iter(self, match=None, count=None):
-        match = match if match else ''
-        yield match + random.choice(string.ascii_letters)
+def kube_error(*_, **__):
+    raise kubernetes.client.rest.ApiException('thrown on purpose')
 
 
 class DummyKubernetes(object):
 
-    def __init__(self, fail=False):
-        self.fail = fail
-
     def list_namespaced_deployment(self, *_, **__):
-        if self.fail:
-            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[
             Bunch(spec=Bunch(replicas='4'),
                   metadata=Bunch(name='pod1'),
@@ -70,8 +65,6 @@ class DummyKubernetes(object):
         ])
 
     def list_namespaced_job(self, *_, **__):
-        if self.fail:
-            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[
             Bunch(spec=Bunch(completions='1', parallelism='1'),
                   metadata=Bunch(name='pod1')),
@@ -80,23 +73,19 @@ class DummyKubernetes(object):
         ])
 
     def patch_namespaced_deployment(self, *_, **__):
-        if self.fail:
-            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(spec=Bunch(replicas='4'),
                                   metadata=Bunch(name='pod'))])
 
     def patch_namespaced_job(self, *_, **__):
-        if self.fail:
-            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(spec=Bunch(completions='0', parallelism='0'),
                                   metadata=Bunch(name='pod'))])
 
 
 class TestAutoscaler(object):
+    # pylint: disable=W0621
 
-    def test_get_desired_pods(self):
+    def test_get_desired_pods(self, redis_client):
         # key, keys_per_pod, min_pods, max_pods, current_pods
-        redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client, 'queue')
         scaler.redis_keys['queue'] = 10
         # desired_pods is > max_pods
@@ -112,74 +101,68 @@ class TestAutoscaler(object):
         desired_pods = scaler.get_desired_pods('queue', 10, 0, 5, 3)
         assert desired_pods == 3
 
-    def test_list_namespaced_deployment(self, mocker):
+    def test_list_namespaced_deployment(self, mocker, redis_client):
         mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
         mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api',
                      DummyKubernetes)
 
-        redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client, 'queue')
         # test ApiException is logged and thrown
-        mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
-        mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api',
-                     lambda: DummyKubernetes(fail=True))
+        mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api.'
+                     'list_namespaced_deployment', kube_error)
         with pytest.raises(kubernetes.client.rest.ApiException):
             scaler.list_namespaced_deployment('ns')
 
-    def test_list_namespaced_job(self, mocker):
+    def test_list_namespaced_job(self, mocker, redis_client):
         mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
         mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api',
                      DummyKubernetes)
 
-        redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client, 'queue')
         # test ApiException is logged and thrown
-        mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api',
-                     lambda: DummyKubernetes(fail=True))
+        mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api.'
+                     'list_namespaced_job', kube_error)
         with pytest.raises(kubernetes.client.rest.ApiException):
             scaler.list_namespaced_job('ns')
 
-    def test_patch_namespaced_deployment(self, mocker):
+    def test_patch_namespaced_deployment(self, mocker, redis_client):
         mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
         mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api',
                      DummyKubernetes)
 
-        redis_client = DummyRedis()
         spec = {'spec': {'replicas': 1}}
         scaler = autoscaler.Autoscaler(redis_client, 'queue')
         # test successful patch
         scaler.patch_namespaced_deployment('job', 'ns', spec)
 
         # test ApiException is logged and thrown
-        mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api',
-                     lambda: DummyKubernetes(fail=True))
+        mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api.'
+                     'patch_namespaced_deployment', kube_error)
         with pytest.raises(kubernetes.client.rest.ApiException):
             scaler.patch_namespaced_deployment('pod', 'ns', spec)
 
-    def test_patch_namespaced_job(self, mocker):
+    def test_patch_namespaced_job(self, mocker, redis_client):
         mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
         mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api',
                      DummyKubernetes)
 
-        redis_client = DummyRedis()
         spec = {'spec': {'parallelism': 1}}
         scaler = autoscaler.Autoscaler(redis_client, 'queue')
         # test successful patch
         scaler.patch_namespaced_job('job', 'ns', spec)
         # test ApiException is logged and thrown
-        mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api',
-                     lambda: DummyKubernetes(fail=True))
+        mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api.'
+                     'patch_namespaced_job', kube_error)
         with pytest.raises(kubernetes.client.rest.ApiException):
             scaler.patch_namespaced_job('job', 'ns', spec)
 
-    def test_get_current_pods(self, mocker):
+    def test_get_current_pods(self, mocker, redis_client):
         mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
         mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api',
                      DummyKubernetes)
         mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api',
                      DummyKubernetes)
 
-        redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(redis_client, 'queue')
 
         # test invalid resource_type
@@ -204,29 +187,35 @@ class TestAutoscaler(object):
         deployed_pods = scaler.get_current_pods('ns', 'job', 'pod2')
         assert deployed_pods == 2
 
-    def test_tally_queues(self):
-        redis_client = DummyRedis()
+    def test_tally_queues(self, redis_client):
         qd = ','
 
-        def expected(x):
-            return sum([len(q) for q in x.split(qd)])
-
         queue = 'queue'
+        expected = random.randint(1, 10)
+        for q in queue.split(qd):
+            for _ in range(expected):
+                redis_client.lpush(q, 'jobHash')
+
         scaler = autoscaler.Autoscaler(
             redis_client, queues=queue, queue_delim=qd)
 
         scaler.tally_queues()
-        assert scaler.redis_keys == {queue: expected(queue) + 1}
+        assert scaler.redis_keys == {queue: expected}
 
         queue = 'predict,track,train'
+        expected = random.randint(1, 10)
+        for q in queue.split(qd):
+            for _ in range(expected):
+                redis_client.lpush(q, 'jobHash')
+
         scaler = autoscaler.Autoscaler(
             redis_client, queues=queue, queue_delim=qd)
         scaler.tally_queues()
 
-        expected_keys = {k: expected(k) + 1 for k in queue.split(qd)}
+        expected_keys = {q: expected for q in queue.split(qd)}
         assert scaler.redis_keys == expected_keys
 
-    def test_scale_resource(self, mocker):
+    def test_scale_resource(self, mocker, redis_client):
         # pylint: disable=E1111
         mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
         mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api',
@@ -234,7 +223,6 @@ class TestAutoscaler(object):
         mocker.patch('autoscaler.autoscaler.kubernetes.client.BatchV1Api',
                      DummyKubernetes)
 
-        redis_client = DummyRedis()
         namespace = 'dummy-namespace'
         name = 'dummy-name'
         scaler = autoscaler.Autoscaler(redis_client, 'queue')
@@ -255,7 +243,7 @@ class TestAutoscaler(object):
         with pytest.raises(ValueError):
             scaler.scale_resource(2, 1, 'badvalue', namespace, name)
 
-    def test_scale(self, mocker):
+    def test_scale(self, mocker, redis_client):
         mocker.patch('autoscaler.autoscaler.kubernetes.config.load_incluster_config')
         mocker.patch('autoscaler.autoscaler.kubernetes.client.AppsV1Api',
                      DummyKubernetes)
@@ -270,7 +258,6 @@ class TestAutoscaler(object):
         queues = 'predict,track'
         qd = ','
 
-        redis_client = DummyRedis()
         scaler = autoscaler.Autoscaler(
             redis_client, queues=queues, queue_delim=qd)
 
