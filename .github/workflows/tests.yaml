@@ -39,13 +39,17 @@ jobs:
         pip install -r requirements.txt
         pip install -r requirements-test.txt
 
-    - name: Run PyTest and Coveralls
+    - name: PyTest
+      run: |
+        pytest --cov autoscaler --pep8
+
+    - name: Coveralls
+      if: env.COVERALLS_REPO_TOKEN != null
       env:
         COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
         COVERALLS_FLAG_NAME: python-${{ matrix.python-version }}
         COVERALLS_PARALLEL: true
       run: |
-        pytest --cov autoscaler --pep8
         coveralls
 
   coveralls:
@@ -55,6 +59,9 @@ jobs:
     steps:
     - name: Coveralls Finished
       uses: coverallsapp/github-action@master
+      if: env.COVERALLS_REPO_TOKEN != null
+      env:
+        COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         parallel-finished: true
