@@ -91,13 +91,14 @@ jobs:
     - name: Build and Run Unit Tests
       env:
         IMAGE: ${{ github.repository }}:${{ github.sha }}
+        NAME: autoscaler
       run: |
         docker buildx build --load --tag ${{ env.IMAGE }} .
         docker run -d -it \
           --entrypoint=/bin/sh \
           --name autoscaler \
           ${{ env.IMAGE }}
-        docker cp requirements-test.txt autoscaler:/usr/src/app/requirements-test.txt
-        docker exec autoscaler pip install -r requirements-test.txt
-        docker exec autoscaler pytest autoscaler
-        docker kill autoscaler && docker rm autoscaler
+        docker cp requirements-test.txt $NAME:/usr/src/app/requirements-test.txt
+        docker exec $NAME pip install -r requirements-test.txt
+        docker exec $NAME pytest
+        docker kill $NAME && docker rm $NAME
