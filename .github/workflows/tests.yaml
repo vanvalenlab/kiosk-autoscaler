@@ -96,7 +96,7 @@ jobs:
         docker buildx build --load --tag ${{ env.IMAGE }} .
         docker run -d -it \
           --entrypoint=/bin/sh \
-          --name autoscaler \
+          --name $NAME \
           ${{ env.IMAGE }}
         docker cp requirements-test.txt $NAME:/usr/src/app/requirements-test.txt
         docker exec $NAME pip install -r requirements-test.txt
